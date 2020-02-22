@@ -10,6 +10,7 @@ Description:
 import os
 from functools import wraps
 from time import time
+from datetime import timedelta, datetime
 
 import joblib
 from Crypto.Cipher import AES
@@ -19,7 +20,7 @@ import torch
 from torch.utils.data import DataLoader, TensorDataset
 import numpy as np
 
-CODE_VERSION = "v1.0 alpha released at 2020.01"
+
 
 
 def encrypt_model(path, model):
@@ -155,7 +156,7 @@ def check_columns(col_dict):
     for col in col_dict:
         if col in ['model', 'dt', 'serial_number', 'manufacturer']:
             index_cols.append(col)
-        elif col=="tag":
+        elif col=="tag" or col=="flag":
             label_cols.append(col)
         elif col_dict[col] == float or col_dict[col] == int or col_dict[col]=='float16' or col_dict[col]=='float32':
             cont_cols.append(col)
@@ -210,7 +211,7 @@ def correct_colum_type(fe_df):
     if 'tag' in fe_df.columns:
         fe_df['tag'] = fe_df['tag'].astype(np.int8)
         
-    fe_df['dt'] = pd.to_datetime(fe_df['dt'], format='%Y%m%d')
+    fe_df['dt'] = sorted(pd.to_datetime(fe_df['dt'], format='%Y%m%d'))
     print(fe_df.dtypes)
 
 def check_category_column(fe_df, cate_cols, num_cates_threshold=5):
