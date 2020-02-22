@@ -113,19 +113,6 @@ def timer(logger):
         return wrapper
 
 
-def read_data_dir(dir_path):
-    def __reformat_input_df(df):
-        if 'date' in df.columns:
-            df.loc[:, 'date'] = pd.to_datetime(df['date'])
-        return df
-
-    ret = []
-    for file_name in ['building_info.csv', 'device_info.csv', 'meter_reading_data.csv', 'weather_data.csv']:
-        file_path = os.path.join(dir_path, file_name)
-        ret.append(__reformat_input_df(pd.read_csv(file_path)) if os.path.exists(file_path) else None)
-    return ret
-
-
 def preprocess_weather_data(weather_data_input_path, weather_data_output_path, start_date, end_date, city):
     weather_df = pd.read_csv(weather_data_input_path)
     weather_df.drop(columns=['Unnamed: 0'], inplace=True)
@@ -163,32 +150,19 @@ def keyword_only(func):
 
 
 def check_columns(col_dict):
+    """Check columns type"""
     index_cols, cate_cols, cont_cols, label_cols = [], [], [], []
     for col in col_dict:
-        if col in ['building_id', 'device_id', 'date', 'building_name', 'device_name']:
+        if col in ['model', 'dt', 'serial_number', 'manufacturer']:
             index_cols.append(col)
-        elif col.startswith("y_"):
+        elif col=="tag":
             label_cols.append(col)
-        elif col_dict[col] == float or col_dict[col] == int:
+        elif col_dict[col] == float or col_dict[col] == int or col_dict[col]=='float16' or col_dict[col]=='float32':
             cont_cols.append(col)
         else:
             cate_cols.append(col)
     return index_cols, cate_cols, cont_cols, label_cols
 
-
-def check_category_column(fe_df, cate_cols, num_cates_threshold=5):
-    cate_transform_dict = {}
-    total_samples = fe_df.shape[0]
-    ret_cate_cols = []
-    for cate in cate_cols:
-        if fe_df[[cate]].drop_duplicates().shape[0] >= num_cates_threshold:
-            cate_stat = fe_df.groupby(cate, as_index=False)[['date']].count()
-            cate_stat['date'] = cate_stat['date'].apply(lambda x: round(x / total_samples, 3))
-            select_cates = set(cate_stat[cate_stat['date'] > 0.005][cate])  # 至少占比0.5%的类别特征才会被选择
-            cate_transform_dict[cate] = select_cates
-            ret_cate_cols += [cate]
-
-    return cate_transform_dict, ret_cate_cols
 
 
 def transform_category_column(fe_df, cate_transform_dict):
@@ -220,41 +194,44 @@ def get_latest_model(dir_path, file_prefix=None):
     return os.path.join(dir_path, files[-1])
 
 
-def get_dataset(x, y):
-    return TensorDataset(
-        torch.from_numpy(x).float(),
-        torch.from_numpy(y).float()
-    )
+def get_time_diff(start_time, end_time):
+    """cal the time func consumes"""
+    time_diff = end_time - start_time
+    return timedelta(seconds=int(round(time_diff)))
 
+def correct_colum_type(fe_df):
+    index_cols, cate_cols, cont_cols, label_cols = check_columns(fe_df.dtypes.to_dict())
+    
+    for cont in cont_cols:
+        fe_df[cont] = fe_df[cont].astype(np.float32)
+        
+    fe_df['model'] = fe_df['model'].astype(np.int8)
+    
+    if 'tag' in fe_df.columns:
+        fe_df['tag'] = fe_df['tag'].astype(np.int8)
+        
+    fe_df['dt'] = pd.to_datetime(fe_df['dt'], format='%Y%m%d')
+    print(fe_df.dtypes)
 
-def get_dataloader(x: np.array, y: np.array, batch_size: int, shuffle: bool = True,
-                   num_workers: int = 0):
-    dataset = get_dataset(x, y)
-    return DataLoader(
-        dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers
-    )
+def check_category_column(fe_df, cate_cols, num_cates_threshold=5):
+    cate_transform_dict = {}
+    total_samples = fe_df.shape[0]
+    ret_cate_cols = []
+    for cate in cate_cols:
+        if fe_df[[cate]].drop_duplicates().shape[0] >= num_cates_threshold:
+            cate_stat = fe_df.groupby(cate, as_index=False)[['date']].count()
+            cate_stat['date'] = cate_stat['date'].apply(lambda x: round(x / total_samples, 3))
+            select_cates = set(cate_stat[cate_stat['date'] > 0.005][cate])  # 至少占比0.5%的类别特征才会被选择
+            cate_transform_dict[cate] = select_cates
+            ret_cate_cols += [cate]
 
+    return cate_transform_dict, ret_cate_cols
 
-def apply_df(args):
-    df, index_cols, time_step = args
-    return generate_time_step_data(df, index_cols, time_step)
-
-
-def generate_time_step_data(sub_df, index_cols, time_step):
-    """
-    # generate time step features based on building and device combo
-    :param sub_df:
-    :return:
-    """
-    feats = sub_df[list(filter(lambda x: x not in set(index_cols), sub_df.columns))].reset_index(drop=True)
-    dates = sub_df[['date']].reset_index(drop=True)
-    time_step_feats, time_step_start_date = [], [],
-    for i in range(max(1, len(feats) - time_step)):
-        time_step_feats += [feats.iloc[i:i + time_step].values]
-        time_step_start_date += [dates.iloc[i].values[0]]
-
-    return pd.DataFrame({'feats': time_step_feats,
-                         'date': time_step_start_date})
-
-
-
+def check_nan_value(fe_df, threshold=30):
+    drop_na_cols = []
+    for col in fe_df.columns:
+        miss_ratio = round(fe_df[col].isnull().sum() / fe_df.shape[0]*100,2)
+        print('%s - %s ' %(col, miss_ratio))
+        if miss_ratio>=threshold:
+            drop_na_cols += [col]
+    return drop_na_cols
