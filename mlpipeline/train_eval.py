@@ -5,7 +5,7 @@ Email: wangmengqiu@ainnovation.com
 Date: 28/09/2019
 
 Description: 
-   Train the model
+   Train and eval the model
 """
 import sys
 import os
@@ -14,14 +14,16 @@ from datetime import timedelta, datetime
 
 import lightgbm as lgb
 from sklearn import metrics
+import pandas as pd
 
 sys.path.append('../')
-from utils.utils import (
+from utils import (
     check_columns, 
     check_category_column, 
     encrypt_model, 
     transform_category_column,
     get_time_diff,
+    decrypt_model,
 )
 import conf
 
@@ -33,15 +35,20 @@ MAX_Y = 100
 SMALL_VALUE = 0.01
 DEFAULT_MISSING_FLOAT = -1.234
 DEFAULT_MISSING_STRING = 'U'
+CLASS_NAME = ['无故障','有故障']
 
-def _percision():
+def _precision(eval_df):
+    ntpp = ''
+    npp = len(eval_df[eval_df.prediction==1])
+    return  
+
+def _recall(eval_df):
+#     npr = eval_df[eval_df.prediction==1]
+#     ntpr = 
     pass 
-
-def _recall():
-     pass
-
-def f1_score():
-    pass
+    
+def _f1_score(percision, recall):
+     return 2* precision * recall / (precision + recall)
 
 def train_pipeline_lightgbm(fe_df, 
                             split_date, 
@@ -114,14 +121,19 @@ def train_pipeline_lightgbm(fe_df,
     print("Confusion Matrix...")
     print(confusion)
     
+    # # get best iteration
+    #  n_estimators = model.best_iteration
+    #  print("n_estimators : ", n_estimators)
+    #  print(metrics+":", evals_results['valid'][metrics][n_estimators-1])
+
     if model_path is not None:
         encrypt_model(model_path, (index_cols, cate_cols, cont_cols, label_cols, 
                                    train_x.columns, model))
 #   return cate_transform_dict, models
     return model, eval_df
 
-def pipeline_inference(fe_df, model_path=os.path.join(conf.DATA_DIR,'lgb')):
-    index_cols, cate_cols, cont_cols, label_cols, features, models = decrypt_model(model_path)
+def pipeline_inference(fe_df, pred_threshold=0.4, model_path=os.path.join(conf.DATA_DIR,'lgb')):
+    index_cols, cate_cols, cont_cols, label_cols, features, model = decrypt_model(model_path)
 #     fe_df = transform_category_column(fe_df, cate_transform_dict)
     assert cate_cols is not None or cont_cols is not None, 'feature columns are empty' 
     
@@ -143,7 +155,7 @@ def pipeline_inference(fe_df, model_path=os.path.join(conf.DATA_DIR,'lgb')):
     test_features = test_features[features]
     ret = fe_df[index_cols]
     ret.loc[:, 'prediction'] = model.predict(test_features) 
-    ret.loc[:,'prediction'] = ret['prediction'].apply(lambda x:1 if x>=0.4 else 0)
+    ret.loc[:,'prediction'] = ret['prediction'].apply(lambda x:1 if x>=pred_threshold else 0)
     
     # save submission
     output_df = ret[ret.prediction==1][['manufacturer','model', 'serial_number','dt']]
@@ -152,7 +164,9 @@ def pipeline_inference(fe_df, model_path=os.path.join(conf.DATA_DIR,'lgb')):
     output_df.to_csv(output_path, index=False, header=False)
     print('%s已保存至%s'%(output_filename,output_path))
     
-    return ret
+    return ret, output_df
+
+
 # def offline_train(train_duration, train_params, correct_types, model_params, model, model_type,
 #                   predict_targets=[1, 2, 7], time_step=5,
 #                   train_date='2100-01-01', business_type="sample_data", logger=None):
