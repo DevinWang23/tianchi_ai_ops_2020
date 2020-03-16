@@ -135,7 +135,7 @@ dmypy.json
 *.pkl
 data/
 *.model
-log/
+*.log
 .idea/
 *.iml
 submission/

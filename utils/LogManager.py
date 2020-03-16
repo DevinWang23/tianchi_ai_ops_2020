@@ -22,19 +22,6 @@ import platform
 import conf
 
 
-# def initialize_logging(name):
-#     logger = logging.getLogger(name)
-#     logger.setLevel(level=logging.INFO)
-#     handler = logging.FileHandler("output/log/%s.log" % name)
-#     handler.setLevel(logging.INFO)
-#     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-#     handler.setFormatter(formatter)
-#     console = logging.StreamHandler()
-#     console.setLevel(logging.INFO)
-#     logger.addHandler(handler)
-#     logger.addHandler(console)
-#     return logger
-
 def log_compact_traceback(self):
     self.error(traceback.format_exc())
 
@@ -50,7 +37,7 @@ DEBUG = logging.DEBUG
 # log output type
 STREAM = "stream"
 SYSLOG = "syslog"
-FILE_AND_TERMINAL = "file_and_termianl"
+FILE = "file"
 
 
 class LogManager(object):
@@ -58,7 +45,7 @@ class LogManager(object):
     created_filename = None
     created_modules = set()
     log_level = INFO
-    log_handle = FILE_AND_TERMINAL
+    log_handle = FILE
     auto_rotate_log = True
 
     @staticmethod
@@ -75,7 +62,7 @@ class LogManager(object):
         return handler
 
     @staticmethod
-    def get_logger(moduleName, log_relative_path=conf.LOG_DIR):
+    def get_logger(moduleName, log_relative_path=conf.log_dir):
         # If we have it already, return it directly
         log_name = moduleName + '.log'
         if (moduleName in LogManager.created_modules):
@@ -91,23 +78,25 @@ class LogManager(object):
                 LogManager.created_filename = os.path.join(log_dir, log_name)
             return LogManager.created_filename
 
+        # create handler
+        if LogManager.log_handle == SYSLOG:
+            if platform.system() == 'Linux':
+                # debug logs use LOG_LOCAL1
+                ch = LH.SysLogHandler('/dev/log', facility=LH.SysLogHandler.LOG_LOCAL1)
+            else:
+                ch = LogManager.getFileHandler(get_log_path())
+        elif LogManager.log_handle == FILE:
+            ch = LogManager.getFileHandler(get_log_path())
+        else:
+            ch = logging.StreamHandler()
+
+        ch.setLevel(LogManager.log_level)
+        # create formatter and add it to the handlers
         formatlist = ['%(asctime)s', '%(name)s', '%(levelname)s', '%(message)s']
         formatter = logging.Formatter(' - '.join(formatlist))
-#         if LogManager.log_handle ==FILE_AND_TERMINAL:  # create handler, output the msg in terminal and log at the meantime
-        fh = LogManager.getFileHandler(get_log_path())
-        ch = logging.StreamHandler()
-        ch.setLevel(LogManager.log_level)
-        fh.setLevel(LogManager.log_level)
         ch.setFormatter(formatter)
-        fh.setFormatter(formatter)
+        # add the handlers to logger  
         logger.addHandler(ch)
-        logger.addHandler(fh)
-#         else:  # just output to terminal
-#             ch = logging.StreamHandler()
-#             ch.setLevel(LogManager.log_level)
-#             ch.setFormatter(formatter)
-#             logger.addHandler(ch)
-            
         LogManager.created_modules.add(moduleName)
         return logger
 
