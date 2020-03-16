@@ -22,10 +22,10 @@ import conf
 # Global setting 
 
 
-def plot_dist_of_cols(dfs, plot_cols):
+def plot_dist_of_cols(dfs, plot_cont_cols):
     """Df in dfs should be sorted by date"""
     for df in dfs:
-        axes = df.boxplot(column = plot_cols, rot=90)
+        axes = df.boxplot(column = plot_cont_cols, rot=90)
         title = '%s - %s'%(df['dt'].iloc[0],df['dt'].iloc[-1])
         axes.set_title(title)
         plt.show()
