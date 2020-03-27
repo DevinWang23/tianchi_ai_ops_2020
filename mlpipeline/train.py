@@ -23,10 +23,6 @@ import matplotlib.pyplot as plt
 from scipy.misc import derivative
 from tqdm import tqdm
 
-from .feature_engineering import (
-    USING_LABEL,
-    FAULT_LABEL,
-)
 sys.path.append('../')
 from utils import (
     check_columns, 
@@ -40,42 +36,41 @@ from utils import (
     standard_scale,
     log_scale,
     remove_cont_cols_with_small_std,
+    correct_column_type
 )
 import conf
+from mlpipeline.feature_engineering import (
+    USING_LABEL,
+    FAULT_LABEL,
+)
 
 # global setting
-# LogManager.created_filename = os.path.join(conf.LOG_DIR, 'mlpipeline.log')
+LogManager.created_filename = os.path.join(conf.LOG_DIR, 'train.log')
 logger = LogManager.get_logger(__name__)
 
 # global varirable
-MIN_X = -1000000
-MAX_X = 1000000
-SMALL_VALUE = 0.01
-DEFAULT_MISSING_STRING = 'U'
 CLASS_NAME = ['无故障','有故障']
 EARLY_STOPPING_ROUNDS=10
-CLS_RANKING = 0.994  # 0.996
+CLS_RANKING = 0.996  # 0.996,0.994
+NUM_SUBMISSION = 30
 
-def _f1_score(eval_df):
-    eval_fault_df = eval_df.loc[eval_df.prediction == FAULT_LABEL]
-    eval_fault_df = eval_fault_df.sort_values('prob', ascending=False)
-    eval_fault_df = eval_fault_df.drop_duplicates(['serial_number', 'model'])
-    eval_fault_df.reset_index(drop=True, inplace=True)
-    eval_fault_df = eval_fault_df.iloc[:100]
+def _f1_score(eval_df,
+              valid_end_date):
     def __precision():
-            mask = eval_fault_df['prediction']==eval_fault_df[USING_LABEL]
-            ntpp = len(eval_fault_df[mask])
-            npp = len(eval_fault_df)
+            mask = eval_df['pred']==eval_df[USING_LABEL]
+            ntpp = len(eval_df[mask])
+            npp = len(eval_df)
             return  ntpp / npp
     def __recall():
-            tmp_df = eval_df[eval_df['flag']==FAULT_LABEL]
+            fault_time_df = pd.read_csv(os.path.join(conf.DATA_DIR,'disk_sample_fault_tag.csv'),usecols=                                               ['model','serial_number','fault_time'], parse_dates=                   ['fault_time'])
+            fault_eval_df = eval_df.merge(fault_time_df, how='left',on=['model','serial_number'])
+            tmp_df = fault_eval_df[fault_eval_df[USING_LABEL]==FAULT_LABEL]
             npr = len(tmp_df) 
-            mask = tmp_df['prediction']==tmp_df['flag']
+            mask = (tmp_df['pred']==tmp_df[USING_LABEL]) & (tmp_df['fault_time']<=valid_end_date)
             ntpr = len(tmp_df[mask])
             return ntpr / npr
     precision, recall = __precision(), __recall()
     return precision, recall, 2* precision * recall / (precision + recall)
-
         
 def _focal_loss_lgb_eval_error(y_pred, dtrain, alpha, gamma):
     """
@@ -114,7 +109,6 @@ def _focal_loss_lgb(y_pred, dtrain, alpha, gamma):
         grad = derivative(partial_fl, y_pred, n=1, dx=1e-6)
         hess = derivative(partial_fl, y_pred, n=2, dx=1e-6)
         return grad, hess
-
 
 def _feature_imp_plot_lgb(model, 
                           features_name,
@@ -176,16 +170,12 @@ def _get_index_for_cv(fe_df,
         train_end_date = train_date_list[i][1]
         train_mask = fe_df['dt'] >= train_start_date 
         train_mask &= fe_df['dt'] <= train_end_date
-#         train_fe_df = fe_df[fe_df['dt'] >= train_start_date] 
-#         train_fe_df = train_fe_df[train_fe_df['dt'] <= train_end_date]   
         train_idx = fe_df[train_mask].index
     
         val_start_date = val_date_list[i][0]
         val_end_date = val_date_list[i][1]
         val_mask = fe_df['dt'] >= val_start_date 
         val_mask &= fe_df['dt'] <= val_end_date   
-#         val_fe_df = fe_df[fe_df['dt'] >= val_start_date] 
-#         val_fe_df = val_fe_df[val_fe_df['dt'] <= val_end_date]   
         val_idx = fe_df[val_mask].index
         fold_idx = (train_idx, val_idx)
         folds.append(fold_idx)     
@@ -195,6 +185,41 @@ def __learning_rate_010_decay_power_0995(current_iter):
     base_learning_rate = 0.1
     lr = base_learning_rate  * np.power(.995, current_iter)
     return lr if lr > 1e-3 else 1e-3
+
+@timer(logger)
+def _sampling_by_month(fe_df,
+                       valid_start_date,
+                       valid_end_date, 
+                       train_start_date,
+                       train_end_date,
+                       ratio=1):
+    logger.info('采样比：%s'%ratio)
+    
+    def __clustering():
+        pass
+    
+    valid_mask = (fe_df['dt']>=valid_start_date) & (fe_df['dt']<=valid_end_date)
+    valid_fe_df = fe_df[valid_mask]
+    train_mask = (fe_df['dt']>=train_start_date) & (fe_df['dt']<=train_end_date)
+    train_fe_df = fe_df[train_mask]
+    del fe_df,
+    gc.collect()
+     
+    train_fe_df.loc[:,'year'] = train_fe_df['dt'].dt.year.astype(np.int32)
+    train_fe_df.loc[:,'month'] = train_fe_df['dt'].dt.month.astype(np.int32)
+    train_fe_sub_dfs = dict(tuple(train_fe_df.groupby(['year','month'])))
+    sample_dfs = []
+    for x in tqdm(train_fe_sub_dfs):
+        tmp_df = train_fe_sub_dfs[x]
+        mask = tmp_df[USING_LABEL]==FAULT_LABEL
+        sample_dfs += [tmp_df[mask]]
+        sample_dfs += [tmp_df[~mask].sample(len(tmp_df[mask])*ratio, random_state=1)]
+    sample_df = pd.concat(sample_dfs, axis=0)
+    logger.info('采样后数据集正负样本数：%s : %s'%(
+                                                                                                                                                           len(sample_df[sample_df[USING_LABEL]==FAULT_LABEL]), \
+                                                                                                                                                           len(sample_df[sample_df[USING_LABEL]!=FAULT_LABEL])))
+    return pd.concat([sample_df.drop(columns=['year','month'], inplace=False),valid_fe_df],axis=0)
+
 
 @timer(logger)
 def train_pipeline_lgb(fe_df, 
@@ -237,7 +262,7 @@ def train_pipeline_lgb(fe_df,
     
     if cate_cols and not cont_cols:
         train_x = train_fe_df[cate_cols]
-        val_x = val_fe_df[cate_cols]
+        val_x = val_fe_df[cate_cols + index_cols]
     elif not cate_cols and cont_cols:
         if use_standard:
                 logger.info("使用标准化: %s"%use_standard)
@@ -250,7 +275,7 @@ def train_pipeline_lgb(fe_df,
                                            train_fe_df, 
                                            val_fe_df)
         train_x = train_fe_df[cont_cols]
-        val_x = val_fe_df[cont_cols]    
+        val_x = val_fe_df[cont_cols + index_cols]    
     else:
         if use_standard:
                 logger.info("使用标准化: %s"%use_standard)
@@ -264,16 +289,19 @@ def train_pipeline_lgb(fe_df,
                                            val_fe_df)
         
         train_x = pd.concat([train_fe_df[cate_cols],
-                             train_fe_df[cont_cols]],axis=1)
+                             train_fe_df[cont_cols]],
+                             axis=1)
         val_x = pd.concat([val_fe_df[cate_cols],
-                           val_fe_df[cont_cols]], axis=1)
+                           val_fe_df[cont_cols],
+                           val_fe_df[index_cols]], 
+                           axis=1)
        
     train_y = train_fe_df[label_cols]
     val_x_index = val_fe_df[index_cols]
     val_y = val_fe_df[label_cols]
-    
-    # train
     feature_name = train_x.columns
+#     focal_loss = lambda x,y: _focal_loss_lgb(x, y, focal_loss_alpha, focal_loss_gamma)
+#     eval_error = lambda x,y: _focal_loss_lgb_eval_error(x, y, focal_loss_alpha, focal_loss_gamma)
     if is_eval:
         if not use_cv:
             num_train_pos = len(train_fe_df[train_fe_df[USING_LABEL]==FAULT_LABEL])
@@ -295,13 +323,11 @@ def train_pipeline_lgb(fe_df,
             
             start_time = time()
             train_set = lgb.Dataset(data=train_x, label=train_y[USING_LABEL])
-            val_set = lgb.Dataset(data=val_x, 
+            val_set = lgb.Dataset(data=val_x[cate_cols + cont_cols], 
                                   label=val_y[USING_LABEL],
                                   reference=train_set)
             evals_result = {}
 #             logger.info('eval参数:%s' % model_params)
-#             focal_loss = lambda x,y: _focal_loss_lgb(x, y, focal_loss_alpha, focal_loss_gamma)
-#             eval_error = lambda x,y: _focal_loss_lgb_eval_error(x, y, focal_loss_alpha, focal_loss_gamma)
 #             model = lgb.train(params=model_params, 
 #                               train_set=train_set, 
 #                               valid_sets=[train_set, val_set],
@@ -322,7 +348,6 @@ def train_pipeline_lgb(fe_df,
                                      evals_result,
                                      'valid_1',
                                      'auc')
-            
             end_time = time()
             logger.info('模型训练用时:%s'%get_time_diff(start_time,end_time))
             _feature_imp_plot_lgb(model,
@@ -331,17 +356,30 @@ def train_pipeline_lgb(fe_df,
                                   save_feat_important
                                  )
 
-            # eval on raw prediction
-            eval_df = pd.concat([val_y[label_cols], val_x_index], axis=1)
-            eval_df.loc[:,'prob'] = model.predict(data=val_x)
-#             eval_df = eval_df[eval_df.model==eval_on_model_id]
-            eval_df.loc[:,'rank'] = eval_df['prob'].rank()
-            eval_df.loc[:,'prediction'] = (eval_df['rank']>=eval_df.shape[0] * CLS_RANKING).astype(int)
-            acc = metrics.accuracy_score(eval_df[USING_LABEL], eval_df['prediction'])
-            report = metrics.classification_report(eval_df[USING_LABEL], eval_df['prediction'], target_names=CLASS_NAME, digits=4)
-            confusion = metrics.confusion_matrix(eval_df[USING_LABEL], eval_df['prediction'])
+            # eval on valid set 
+            results = []
+            eval_df = pd.concat([val_x, val_y], axis=1)
+            eval_df = eval_df.sort_values('dt')
+            start_date, end_date = eval_df.iloc[0]['dt'], eval_df.iloc[-1]['dt'] 
+            date_range = pd.date_range(start_date, end_date, freq='D')
+            for date in date_range:
+                logger.info('验证日期：%s'%date)
+                sub_eval_df = eval_df[eval_df.dt==date]
+                sub_eval_df.loc[:,'prob'] = model.predict(data=sub_eval_df[cont_cols + cate_cols])
+                sub_eval_df.loc[:,'rank'] = sub_eval_df['prob'].rank()
+                sub_eval_df.loc[:,'pred'] = (sub_eval_df['rank']>=sub_eval_df.shape[0] * CLS_RANKING).astype(int)
+                sub_eval_df = sub_eval_df.loc[sub_eval_df.pred == FAULT_LABEL]
+                sub_eval_df = sub_eval_df.sort_values('prob', ascending=False)
+                top_sub_eval_df = sub_eval_df.reset_index(drop=True, inplace=False).iloc[:NUM_SUBMISSION]
+                logger.info('原始预测为fault disk的个数：%s'%len(sub_eval_df))
+                results.append(top_sub_eval_df)
+            eval_df = pd.concat(results)
+            eval_df = eval_df.drop_duplicates(['serial_number', 'model'])
+            logger.info('最终预测个数:%s'%len(eval_df))
+            acc = metrics.accuracy_score(eval_df[USING_LABEL], eval_df['pred'])
+            report = metrics.classification_report(eval_df[USING_LABEL], eval_df['pred'], target_names=CLASS_NAME, digits=4)
+            confusion = metrics.confusion_matrix(eval_df[USING_LABEL], eval_df['pred'])
             msg = 'Val Acc: {0:>6.2%}'
-            logger.info("分类阈值: %s"%CLS_RANKING)
             logger.info(msg.format(acc))
             logger.info("Precision, Recall and F1-Score...")
             logger.info(report)
@@ -349,7 +387,9 @@ def train_pipeline_lgb(fe_df,
             logger.info(confusion)
 
             # eval on competition index by topk 
-            precision, recall, f1_score = _f1_score(eval_df)
+            precision, recall, f1_score = _f1_score(eval_df,
+                                                    valid_end_date,
+                                                   )
             logger.info("竞赛recall: %s"% recall)
             logger.info("竞赛precision: %s"%precision)
             logger.info("竞赛f1-score: %s"%f1_score)
@@ -370,9 +410,9 @@ def train_pipeline_lgb(fe_df,
             n_HP_points_to_test = 10
             fit_params={"early_stopping_rounds":10, 
             "eval_metric" : 'auc', 
-            "eval_set" : [(val_x,val_y[USING_LABEL])],
-            'eval_names': ['valid'],
-            'callbacks': [lgb.reset_parameter(learning_rate=__learning_rate_010_decay_power_0995)],
+#             "eval_set" : [(val_x,val_y[USING_LABEL])],
+#             'eval_names': ['valid'],
+#             'callbacks': [lgb.reset_parameter(learning_rate=__learning_rate_010_decay_power_0995)],
             'verbose': 5,
             'categorical_feature': 'auto'}
             
@@ -413,6 +453,8 @@ def train_pipeline_lgb(fe_df,
             end_time = time()
             logger.info('模型训练用时:%s'%get_time_diff(start_time,end_time))
             return (None, None)
+    
+    # train model 
     else:
         num_train_pos = len(train_fe_df[train_fe_df[USING_LABEL]==FAULT_LABEL])
         num_train_neg = len(train_fe_df[train_fe_df[USING_LABEL]!=FAULT_LABEL])
@@ -425,6 +467,14 @@ def train_pipeline_lgb(fe_df,
         start_time = time()
         train_set = lgb.Dataset(data=train_x, label=train_y[USING_LABEL])
         evals_result = {}
+#         logger.info('train参数:%s' % model_params)
+#         model = lgb.train(params=model_params, 
+#                           train_set=train_set, 
+#                           valid_sets=[train_set],
+#                           evals_result = evals_result,
+#                           fobj=focal_loss,
+#                           feval=eval_error,
+#                           early_stopping_rounds=EARLY_STOPPING_ROUNDS)
         logger.info('train参数:%s' % model_params)
         model = lgb.train(params=model_params, 
                           train_set=train_set, 
@@ -432,7 +482,6 @@ def train_pipeline_lgb(fe_df,
                           evals_result = evals_result, 
                           early_stopping_rounds=EARLY_STOPPING_ROUNDS)
         
-#         print(evals_result)
         _log_best_round_of_model(model,
                                  evals_result,
                                  'training',
@@ -464,6 +513,8 @@ def train(model_params,
           train_start_date,
           train_end_date,
           drop_cols  = [],
+          use_sampling=False,
+          sampling_ratio=1,
           focal_loss_alpha=6, 
           focal_loss_gamma=0.9,
           save_feat_important=False,
@@ -480,14 +531,17 @@ def train(model_params,
           valid_end_date='2100-12-31'):
     
     if is_eval:
-        logger.info("当前模式:eval on model %s, train on model %s, 当前使用模型:%s, 使用cv:%s, 训练集日期:%s - %s, 验证集日期:%s - %s"%                                                                                          (eval_on_model_id, 
+        logger.info("当前模式:eval on model %s, train on model %s, 当前使用模型:%s, 使用cv:%s, 训练集日期:%s - %s, 验证集日期:%s - %s, 分类阈值: %s, 截断个数: %s, 采样：%s"%                                                                                                                                                                                               (eval_on_model_id, 
                                                                                         train_on_model_id,
                                                                                         model_name, 
                                                                                         use_cv,
                                                                                         train_start_date,
                                                                                         train_end_date,
                                                                                         valid_start_date,
-                                                                                        valid_end_date)) 
+                                                                                        valid_end_date,
+                                                                                        CLS_RANKING,
+                                                                                        NUM_SUBMISSION,
+                                                                                        use_sampling)) 
     else:
         logger.info("当前模式:train, 当前使用模型:%s, 训练日期:%s - %s" %(
                                                                     model_name, 
@@ -496,10 +550,15 @@ def train(model_params,
                                                                           )) 
         
     train_fe_df = pd.read_feather(os.path.join(conf.DATA_DIR, train_fe_filename))
-#     train_fe_df.loc[:,'smart_9raw_in_day_unit'] = train_fe_df['smart_9raw']//24
-#     train_fe_df.loc[:,'smart_9raw_weight'] = round(train_fe_df['smart_9raw_in_day_unit']/1500,2)
     if drop_cols:
         train_fe_df.drop(columns=drop_cols, inplace=True)
+    if use_sampling:
+            train_fe_df = _sampling_by_month(train_fe_df, 
+                                             valid_start_date, 
+                                             valid_end_date,
+                                             train_start_date,
+                                             train_end_date,
+                                             sampling_ratio)
         
     model_save_path = os.path.join(conf.TRAINED_MODEL_DIR, "%s.model.%s" % (model_name, datetime.now().isoformat())) if not                           is_eval else None
 
@@ -526,15 +585,17 @@ def train(model_params,
     elif model_name == 'stacking':
         # TODO: 增加stacking部分train pipeline
         raise NotImplementedError('stacking model has not been implemented')
+    elif model_name == 'lr':
+        raise NotImplementedError('stacking model has not been implemented') 
     else:
         raise NotImplementedError('%s was not implemented' % model_type)
         
     del train_fe_df
     gc.collect()
+    logger.info("%s模型训练完成!模型保存至:%s" % (model_name, model_save_path)) if not is_eval else             logger.info("%s模型训练完成!"%       model_name) 
     
-    logger.info("%s模型训练完成!模型保存至:%s" % (model_name, model_save_path)) if not is_eval else logger.info("%s模型训练完成!"%       model_name) 
     return ret 
 
 
 if __name__ == '__main__': 
-     pass
+    pass

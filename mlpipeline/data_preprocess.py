@@ -27,16 +27,20 @@ from utils import (
 )
 import conf
 
+LogManager.created_filename = os.path.join(conf.LOG_DIR, 'data_prerocess.log')
 logger = LogManager.get_logger(__name__)
 
-def get_fault_info(filename='disk_sample_fault_tag.csv'):
+def get_fault_info(filenames=['disk_sample_fault_tag.csv', 'disk_sample_fault_tag_201808.csv']):
     """
     Generate a dictionary to store fault date and fault tag of each disk.
     Use tuples (manufacturer, model, serial_number) as keys.
     """
-    fault_tag_df = pd.read_csv(os.path.join(conf.DATA_DIR, filename))
+    fault_df1 = pd.read_csv(os.path.join(conf.DATA_DIR, filenames[0]))
+    fault_df2 = pd.read_csv(os.path.join(conf.DATA_DIR, filenames[1]))
+    fault_df2.drop(['key'], axis=1,inplace=True)
+    fault_tag_df = pd.concat([fault_df1, fault_df2], ignore_index=True)
     fault_dic = {}
-
+    
     for _, row in fault_tag_df.iterrows():
         f_time = row["fault_time"]
         tag = row["tag"]
@@ -121,10 +125,10 @@ def convert_test_to_hdf(test_file, save_filename):
 if __name__ == "__main__":
     
     period_2017 = ["201707", "201708", "201709", "201710", "201711", "201712"]
-    period_2018 = ["201801", "201802", "201803", "201804", "201805", "201806", "201807"]
+    period_2018 = ["201801", "201802", "201803", "201804", "201805", "201806", "201807", "201808"]
 
     save_data_to_hdf(period_2017, "data_2017_all.h5")
     save_data_to_hdf(period_2018, "data_2018_all.h5")
 
     #convert_test_to_hdf("disk_sample_smart_log_test_a.csv", "data_201808_test_all.h5")
-    #convert_test_to_hdf("disk_sample_smart_log_test_b.csv", "data_201808_test_all_b.h5")
+    convert_test_to_hdf("disk_sample_smart_log_test_b.csv", "data_201808_test_b.h5")

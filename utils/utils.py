@@ -14,52 +14,21 @@ from datetime import timedelta, datetime
 import sys
 
 import joblib
-# from Crypto.Cipher import AES
-# from binascii import b2a_hex, a2b_hex
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import StandardScaler
+from tqdm import tqdm
 
 from .LogManager import LogManager 
 sys.path.append('../')
 import conf
 
 # global setting
-LogManager.created_filename = os.path.join(conf.LOG_DIR, 'mlpipeline.log')
+LogManager.created_filename = os.path.join(conf.LOG_DIR, 'utils.log')
 logger = LogManager.get_logger(__name__)
-
-# def encrypt_model(path, model):
-#     def __encrypt(text):
-#         cryptor = AES.new(b"qz_secret_$#df21", AES.MODE_CBC,
-#                           b"qz_secret_$#df21")
-#         length = 16
-#         count = len(text)
-#         add = length - (count % length)
-#         text = text + (b'\0' * add)
-#         ciphertext = cryptor.encrypt(text)
-#         return b2a_hex(ciphertext)
-
-#     joblib.dump(model, path)
-#     text = open(path, "rb").read()
-#     with open(path, "wb") as f:
-#         f.write(__encrypt(text))
         
 def save_model(path, model):
     joblib.dump(model, path)
-
-# def decrypt_model(path):
-#     def __decrypt(text):
-#         cryptor = AES.new(b"qz_secret_$#df21", AES.MODE_CBC,
-#                           b"qz_secret_$#df21")
-#         plain_text = cryptor.decrypt(a2b_hex(text))
-#         return plain_text.rstrip(b'\0')
-
-#     text = open(path, "rb").read()
-#     with open(path + "1", "wb") as f:
-#         f.write(__decrypt(text))
-#     model = joblib.load(path + "1")
-#     os.remove(path + "1")
-#     return model
 
 def load_model(path):
     model = joblib.load(path)
@@ -112,7 +81,7 @@ def check_columns(col_dict):
         else:
             cate_cols.append(col)
     return index_cols, cate_cols, cont_cols, label_cols
-
+                        
 def transform_category_column(fe_df, cate_transform_dict):
     for cate in cate_transform_dict:
         cate_set = cate_transform_dict[cate]
@@ -171,15 +140,20 @@ def correct_column_type(fe_df, use_float16=False):
                     fe_df[col] = fe_df[col].astype(np.float64)
                 
     __reduce_cont_cols_mem_by_max_min_value()
-    fe_df['model'] = fe_df['model'].astype(np.int8)
-    if 'tag' in fe_df.columns:
+    fe_columns = fe_df.columns
+    if 'model' in fe_columns:
+        fe_df['model'] = fe_df['model'].astype(np.int8)
+    if 'tag' in fe_columns:
         fe_df['tag'] = fe_df['tag'].astype(np.int8)
-    if 'flag' in fe_df.columns:
+    if 'flag' in fe_columns:
         fe_df['flag'] = fe_df['flag'].astype(np.int8)
-    if '30_day' in fe_df.columns:
+    if '30_day' in fe_columns:
         fe_df['30_day'] = fe_df['30_day'].astype(np.int8)
-    fe_df['dt'] = pd.to_datetime(fe_df['dt'], format='%Y%m%d')
-    fe_df.sort_values(by='dt',inplace=True)
+    if 'dt' in fe_columns:
+        fe_df['dt'] = pd.to_datetime(fe_df['dt'], format='%Y%m%d')
+        fe_df.sort_values(by='dt',inplace=True)
+    if 'fault_time' in fe_columns:
+        fe_df['fault_time'] = pd.to_datetime(fe_df['fault_time'], format='%Y%m%d')
     logger.info('col_types: %s'%fe_df.dtypes)
 
 @timer(logger)
@@ -197,7 +171,7 @@ def check_category_column(fe_df, cate_cols, num_cates_threshold=5):
 
     return cate_transform_dict, ret_cate_cols
 
-# @timer(logger)
+@timer(logger)
 def check_nan_value(fe_df, threshold=30):
     nan_cols = []
     for col in fe_df.columns:
@@ -205,6 +179,7 @@ def check_nan_value(fe_df, threshold=30):
         logger.info("%s - %s%%" % (col, miss_ratio))
         if miss_ratio>=threshold:
             nan_cols += [col]
+    logger.info('drop cols: %s' % nan_cols)
     return nan_cols
 
 @timer(logger)
@@ -219,15 +194,13 @@ def remove_cont_cols_with_small_std(fe_df, cont_cols, threshold=1):
     return small_std_cols
 
 @timer(logger)
-def remove_cont_cols_with_unique_value(train_fe_df, test_fe_df, cont_cols, threshold=3):
-    assert not (train_fe_df.empty and test_fe_df.empty) and len(cont_cols)>0, 'fe_df and cont_cols cannot be empty'
+def remove_cont_cols_with_unique_value(fe_df, cont_cols, threshold=3):
+    assert not fe_df.empty and len(cont_cols)>0, 'fe_df and cont_cols cannot be empty'
     unique_cols = []
     for col in cont_cols:
-        train_num_unique = len(train_fe_df[col].unique())
-        test_num_unique = len(test_fe_df[col].unique())
-        logger.info('train: %s - %s ' %(col, train_num_unique))
-        logger.info('test: %s - %s ' %(col, test_num_unique))
-        if train_num_unique<=threshold or test_num_unique<=threshold:
+        num_unique = len(fe_df[col].unique())
+        logger.info('fe_df: %s - %s ' %(col, num_unique))
+        if num_unique<=threshold:
              unique_cols += [col]
     logger.info('drop cols: %s' % unique_cols)
     return unique_cols
@@ -247,13 +220,10 @@ def standard_scale(cont_cols,
 def log_scale(cont_cols,
               train_fe_df,
               valid_fe_df=pd.DataFrame()):
-        train_fe_df.loc[:,cont_cols] = train_fe_df[cont_cols].apply(np.log2).fillna(0)
-#         train_fe_df.loc[:,cont_cols] = train_fe_df[cont_cols].apply(np.log2)
-        
-#         train_fe_df.loc[:,cont_cols] = train_fe_df[cont_cols].replace(0, np.nan)
+        for cont_col in tqdm(cont_cols):
+            train_fe_df.loc[:,cont_col] = np.log2(train_fe_df[cont_col] + 1)
         if not valid_fe_df.empty:
-            valid_fe_df.loc[:,cont_cols] =  valid_fe_df[cont_cols].apply(np.log2).fillna(0)
-#             valid_fe_df.loc[:,cont_cols] =  valid_fe_df[cont_cols].apply(np.log2)
-#             valid_fe_df.loc[:,cont_cols] =  valid_fe_df[cont_cols].replace(0, np.nan)
+            for cont_col in tqdm(cont_cols):
+                valid_fe_df.loc[:,cont_col] =  np.log2(valid_fe_df[cont_col] + 1)
         return train_fe_df, valid_fe_df
      

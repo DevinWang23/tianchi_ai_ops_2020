@@ -140,4 +140,4 @@ log/
 *.iml
 submission/
 figs/
-trained_model/
+tcdata/
