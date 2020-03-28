@@ -46,8 +46,7 @@ DEFAULT_MISSING_FLOAT = -1.234
 DEFAULT_MISSING_STRING = 'U'
 STD_THRESHOLD_FOR_REMOVING_COLUMNS = 1
 FAULT_LABEL = 1
-MAX_SAMPLING_DISKS = 10000
-USING_LABEL = 'tag'
+USING_LABEL = 'flag'
 DROP_UNIQUE_COL_THRESHOLD = 1  # i.e. the unique number of this column should be larger than threshold 
 DROP_NAN_COL_THRESHOLD = 30  # i.e. 30%
 # SELECTED_CONT_COLS = ['smart_1_normalized','smart_7_normalized',
@@ -329,28 +328,12 @@ def _fill_cont_cols_na_value_by_default_value(train_test_fe_df,
     train_test_fe_df.fillna(value=values, inplace=True)
     return train_test_fe_df
 
-def _retag(disk_smart_df, num_tag):
-    fault_mask = disk_smart_df[USING_LABEL] == FAULT_LABEL
-    fault_disk_df = disk_smart_df[fault_mask]
-    normal_disk_df = disk_smart_df[~fault_mask]
-    
-    group_cols = ['model','serial_number']
-    sub_dfs = dict(tuple(fault_disk_df.groupby(group_cols)))
-    results = []
-    for x in sub_dfs:
-        sub_dfs[x][USING_LABEL].iloc[:-num_tag] = 0
-        results += [sub_dfs[x]]
-    results += [normal_disk_df]
-    return pd.concat(results,axis=0)
-
 @timer(logger)
 def _data_preprocess(clip_start_date,
                      clip_end_date,
                      disk_smart_df, 
                      use_model_id,
                      is_train,
-                     use_retag,
-                     num_tag
                     ):
     """
     
@@ -369,14 +352,12 @@ def _data_preprocess(clip_start_date,
     
     if is_train:
         cols_with_unique_number = remove_cont_cols_with_unique_value(disk_smart_df, 
-                                                                     cont_cols,
-                                                                     threshold=DROP_UNIQUE_COL_THRESHOLD)
+                                                 cont_cols,
+                                                 threshold=DROP_UNIQUE_COL_THRESHOLD)
         disk_smart_df.drop(columns=cols_with_unique_number, inplace=True)
         drop_na_cols = check_nan_value(disk_smart_df,threshold=DROP_NAN_COL_THRESHOLD)
         disk_smart_df.drop(columns=drop_na_cols, inplace=True) 
         disk_smart_df.loc[disk_smart_df[USING_LABEL]!=0,USING_LABEL] = FAULT_LABEL
-        if use_retag:
-            disk_smart_df = _retag(disk_smart_df, num_tag)
     return disk_smart_df
 
 @timer(logger)
@@ -389,36 +370,32 @@ def _merge_non_fe_df_and_fe_df(non_fe_df, fe_df, index_cols):
 
 @timer(logger)
 def feature_engineering(filename='',
-                        fe_save_filename='train_fe.feather',
-                        is_train=True,
-                        clip_start_date=None, 
-                        clip_end_date=None, 
-                        pred_start_date='2018-09-01',
-                        pred_end_date ='2018-09-30',
-                        use_model_id=None,
-                        use_retag=False,
-                        num_tag=10,
-                        num_processes = 10):
+                fe_save_filename='train_fe.feather',
+                is_train=True,
+                clip_start_date=None, 
+                clip_end_date=None, 
+                pred_start_date='2018-09-01',
+                pred_end_date ='2018-09-30',
+                use_model_id=None,
+                num_processes = 10):
     """
     
     :return:
     """
     logger.info('训练数据特征工程: %s，数据集截断起始日期：%s, 数据集截断结束日期：%s'%(is_train, 
-                                                                            clip_start_date, 
-                                                                            clip_end_date))
+                                                            clip_start_date, 
+                                                            clip_end_date))
     
     # load dataset
-    disk_smart_df = _load_data_into_dataframe(filename, is_train)
+    disk_smart_df = _load_data_into_dataframe(filename,
+                                is_train)
     
     # preprocess data
-    disk_smart_df =  _data_preprocess(clip_start_date,
-                                      clip_end_date,
-                                      disk_smart_df, 
-                                      use_model_id,
-                                      is_train,
-                                      use_retag,
-                                      num_tag)
-    
+    disk_smart_df = _data_preprocess(clip_start_date,
+                           clip_end_date,
+                           disk_smart_df, 
+                           use_model_id,
+                           is_train)
    
     """ generate cont feats"""
     # sliding window feature, can be used after all conts features generated 
@@ -437,7 +414,7 @@ def feature_engineering(filename='',
     
     """generate cate feats"""
     # change model id into cate feat
-    fe_df.loc[:,'model_type'] = fe_df['model'].map({1:0,2:1}).astype('category')
+    fe_df['model_type'] = fe_df['model'].map({1:0,2:1}).astype('category')
 
     # drop the col with too many nan
     if is_train:

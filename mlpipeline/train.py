@@ -52,21 +52,26 @@ logger = LogManager.get_logger(__name__)
 CLASS_NAME = ['无故障','有故障']
 EARLY_STOPPING_ROUNDS=10
 CLS_RANKING = 0.996  # 0.996,0.994
-NUM_SUBMISSION = 30
+NUM_SUBMISSION = 20
 
-def _f1_score(eval_df,
-              valid_end_date):
+def _f1_score( eval_df,
+          valid_end_date):
     def __precision():
-            mask = eval_df['pred']==eval_df[USING_LABEL]
+            mask = eval_df['pred']==eval_df['tag']
             ntpp = len(eval_df[mask])
             npp = len(eval_df)
             return  ntpp / npp
     def __recall():
-            fault_time_df = pd.read_csv(os.path.join(conf.DATA_DIR,'disk_sample_fault_tag.csv'),usecols=                                               ['model','serial_number','fault_time'], parse_dates=                   ['fault_time'])
-            fault_eval_df = eval_df.merge(fault_time_df, how='left',on=['model','serial_number'])
-            tmp_df = fault_eval_df[fault_eval_df[USING_LABEL]==FAULT_LABEL]
-            npr = len(tmp_df) 
-            mask = (tmp_df['pred']==tmp_df[USING_LABEL]) & (tmp_df['fault_time']<=valid_end_date)
+#             fault_time_df = pd.read_csv(os.path.join(conf.DATA_DIR,'disk_sample_fault_tag.csv'),usecols=                                               ['model','serial_number','fault_time'], parse_dates=                   ['fault_time'])
+#             fault_eval_df = eval_df.merge(fault_time_df, how='left',on=['model','serial_number'])
+#             tmp_df = fault_eval_df[fault_eval_df[USING_LABEL]==FAULT_LABEL]
+            
+#             npr = len(tmp_df) 
+#             mask = (tmp_df['pred']==tmp_df[USING_LABEL]) & (tmp_df['fault_time']<=valid_end_date)
+#             ntpr = len(tmp_df[mask])
+            tmp_df = eval_df[eval_df.flag==1] 
+            npr = len(tmp_df)
+            mask = tmp_df['pred']==tmp_df.flag
             ntpr = len(tmp_df[mask])
             return ntpr / npr
     precision, recall = __precision(), __recall()
@@ -88,6 +93,23 @@ def _focal_loss_lgb_eval_error(y_pred, dtrain, alpha, gamma):
     p = 1/(1+np.exp(-y_pred))
     loss = -( a*y_true + (1-a)*(1-y_true) ) * (( 1 - ( y_true*p + (1-y_true)*(1-p)) )**g) * ( y_true*np.log(p)+(1-                        y_true)*np.log(1-p) )
     return 'focal_loss', np.mean(loss), False
+
+def _retag(disk_smart_df, 
+        num_tag):
+    fault_mask = disk_smart_df['tag'] == FAULT_LABEL
+    fault_disk_df = disk_smart_df[fault_mask]
+    normal_disk_df = disk_smart_df[~fault_mask]
+    
+    group_cols = ['model','serial_number']
+    fault_sub_dfs = dict(tuple(fault_disk_df.groupby(group_cols)))
+    results = []
+    for x in fault_sub_dfs:
+        fault_sub_dfs[x]['30_tag'] = 1
+        fault_sub_dfs[x]['tag'].iloc[:-num_tag] = 0
+        results += [fault_sub_dfs[x]]
+    normal_disk_df['30_tag'] = 0
+    results += [normal_disk_df]
+    return pd.concat(results,axis=0)
 
 def _focal_loss_lgb(y_pred, dtrain, alpha, gamma):
         """
@@ -512,7 +534,9 @@ def train(model_params,
           is_eval,
           train_start_date,
           train_end_date,
-          drop_cols  = [],
+          use_retag=False,
+          num_tag=10,
+          drop_cols = [],
           use_sampling=False,
           sampling_ratio=1,
           focal_loss_alpha=6, 
@@ -526,44 +550,54 @@ def train(model_params,
           n_fold=3,
           train_on_model_id=None,
           eval_on_model_id=None,
-          train_fe_filename='train_fe_df.h5',
+          fe_filename='train_fe_df.h5',
           valid_start_date='2100-12-31',
           valid_end_date='2100-12-31'):
     
     if is_eval:
-        logger.info("当前模式:eval on model %s, train on model %s, 当前使用模型:%s, 使用cv:%s, 训练集日期:%s - %s, 验证集日期:%s - %s, 分类阈值: %s, 截断个数: %s, 采样：%s"%                                                                                                                                                                                               (eval_on_model_id, 
-                                                                                        train_on_model_id,
-                                                                                        model_name, 
-                                                                                        use_cv,
-                                                                                        train_start_date,
-                                                                                        train_end_date,
-                                                                                        valid_start_date,
-                                                                                        valid_end_date,
-                                                                                        CLS_RANKING,
-                                                                                        NUM_SUBMISSION,
-                                                                                        use_sampling)) 
+        logger.info("当前模式:eval on model %s, train on model %s, 当前使用模型:%s, 使用cv:%s, 训练集日期:%s - %s, 验证集日期:%s - %s, 分类阈值: %s, 截断个数: %s, 采样：%s, 使用的标签：%s"%                                                                                                                                                                                               (eval_on_model_id, 
+            train_on_model_id,
+            model_name, 
+            use_cv,
+            train_start_date,
+            train_end_date,
+            valid_start_date,
+            valid_end_date,
+            CLS_RANKING,
+            NUM_SUBMISSION,
+            use_sampling,
+            USING_LABEL )) 
     else:
         logger.info("当前模式:train, 当前使用模型:%s, 训练日期:%s - %s" %(
-                                                                    model_name, 
-                                                                    train_start_date,
-                                                                    train_end_date,
-                                                                          )) 
+                                                    model_name, 
+                                                    train_start_date,
+                                                    train_end_date,
+                                                          )) 
         
-    train_fe_df = pd.read_feather(os.path.join(conf.DATA_DIR, train_fe_filename))
-    if drop_cols:
-        train_fe_df.drop(columns=drop_cols, inplace=True)
+    fe_df = pd.read_feather(os.path.join(conf.DATA_DIR, fe_filename))
+    if use_retag:
+        fe_df = _retag(fe_df, num_tag)
     if use_sampling:
-            train_fe_df = _sampling_by_month(train_fe_df, 
-                                             valid_start_date, 
-                                             valid_end_date,
-                                             train_start_date,
-                                             train_end_date,
-                                             sampling_ratio)
-        
-    model_save_path = os.path.join(conf.TRAINED_MODEL_DIR, "%s.model.%s" % (model_name, datetime.now().isoformat())) if not                           is_eval else None
-
+            fe_df = _sampling_by_month(fe_df, 
+                                  valid_start_date, 
+                                  valid_end_date,
+                                  train_start_date,
+                                  train_end_date,
+                                  sampling_ratio)
+            if not os.path.exists(os.path.join(conf.DATA_DIR,'sample_%s_%s'% (sampling_ratio,fe_filename))):
+                    sample_fe_save_path = os.path.join(conf.DATA_DIR,'sample_%s_%s'% (sampling_ratio, fe_filename))
+                    fe_df.reset_index(drop=True,inplace=True)
+                    fe_df.to_feather(sample_fe_save_path)
+                    logger.info('采样文件已保存至%s'%sample_fe_save_path)
+    if drop_cols:
+        fe_df.drop(columns=drop_cols, inplace=True)
+            
+#     model_save_path = os.path.join(conf.TRAINED_MODEL_DIR, "%s_%s.model" % (model_name, datetime.now().isoformat())) if not                           is_eval else None
+    model_save_path = os.path.join(conf.TRAINED_MODEL_DIR, "%s.model" % model_name) if not is_eval else None
+    
+#     model_save_path = os.path.join(conf.TRAINED_MODEL_DIR, "%s.model.%s" % (model_name, datetime.now().isoformat()))
     if model_name == 'lgb':
-        ret = train_pipeline_lgb(train_fe_df,
+        ret = train_pipeline_lgb(fe_df,
                            model_params,
                            eval_on_model_id,
                            train_on_model_id,
@@ -590,9 +624,9 @@ def train(model_params,
     else:
         raise NotImplementedError('%s was not implemented' % model_type)
         
-    del train_fe_df
+    del fe_df
     gc.collect()
-    logger.info("%s模型训练完成!模型保存至:%s" % (model_name, model_save_path)) if not is_eval else             logger.info("%s模型训练完成!"%       model_name) 
+    logger.info("%s模型训练完成!模型保存至:%s" % (model_name, model_save_path)) if not is_eval else logger.info("%s模型训练完成!"% model_name) 
     
     return ret 
 
