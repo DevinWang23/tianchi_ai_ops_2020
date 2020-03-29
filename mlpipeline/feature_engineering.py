@@ -46,7 +46,7 @@ DEFAULT_MISSING_FLOAT = -1.234
 DEFAULT_MISSING_STRING = 'U'
 STD_THRESHOLD_FOR_REMOVING_COLUMNS = 1
 FAULT_LABEL = 1
-USING_LABEL = 'flag'
+USING_LABEL = 'tag'
 DROP_UNIQUE_COL_THRESHOLD = 1  # i.e. the unique number of this column should be larger than threshold 
 DROP_NAN_COL_THRESHOLD = 30  # i.e. 30%
 # SELECTED_CONT_COLS = ['smart_1_normalized','smart_7_normalized',
@@ -97,8 +97,13 @@ DEGRADATION_ERR_COLS = {
                         'smart_193_normalized':0.00097
 } 
 
-SLOPE_COLS = ['smart_1_normalized',
-             'smart_195_normalized']  # cols used to cal slope features
+# SLOPE_COLS = ['smart_1_normalized',
+#           'smart_5raw',
+#           'smart_197raw',
+#           'smart_198raw']  # cols used to cal slope features
+SLOPE_COLS = [
+          'smart_5raw',
+          ]  # cols used to cal slope features
 
 def _apply_df(args):
     df, index_cols, cont_cols, cate_cols = args
@@ -197,18 +202,18 @@ def _create_daily_features(df,
     cont_dfs = []
     for i_window in window_list:
         target_df = df_sliding_cols
-#         cont_dfs.append((target_df.rolling(i_window * window_size, min_periods=min_periods).min()
-#                     ).rename(
-#             columns=dict(zip(cont_cols, [col + "_min_%s" % (i_window * window_size) for col in cont_cols]))))
+        cont_dfs.append((target_df.rolling(i_window * window_size, min_periods=min_periods).min()
+                    ).rename(
+            columns=dict(zip(cont_cols, [col + "_min_%s" % (i_window * window_size) for col in cont_cols]))))
         cont_dfs.append((target_df.rolling(i_window * window_size, min_periods=min_periods).max()
                     ).rename(
             columns=dict(zip(cont_cols, [col + "_max_%s" % (i_window * window_size) for col in cont_cols]))))
         cont_dfs.append((target_df.rolling(i_window * window_size, min_periods=min_periods).std()
                     ).rename(
             columns=dict(zip(cont_cols, [col + "_std_%s" % (i_window * window_size) for col in cont_cols]))))
-        cont_dfs.append((target_df.rolling(i_window * window_size, min_periods=min_periods).mean()
-                    ).rename(
-            columns=dict(zip(cont_cols, [col + "_mean_%s" % (i_window * window_size) for col in cont_cols]))))
+#         cont_dfs.append((target_df.rolling(i_window * window_size, min_periods=min_periods).mean()
+#                     ).rename(
+#             columns=dict(zip(cont_cols, [col + "_mean_%s" % (i_window * window_size) for col in cont_cols]))))
 
 # Cal the diff value between last period and the tendency of window
     for i_window in window_list:
@@ -216,14 +221,14 @@ def _create_daily_features(df,
                 cont_dfs.append(df_sliding_cols[[col]].diff(periods=i_window*window_size)                            .rename(columns=dict({col:'%s_diff_for_last_period_%s' % (col, i_window * window_size)})))
     
     # Cal the slope feature
-#     for i_window in window_list:
-#             target_df = pd.concat([df_sliding_cols[SLOPE_COLS],df[['smart_9raw']]],axis=1)
-#             for col in target_df.columns:
-#                 if col != 'smart_9raw':
-#                     tmp_df = target_df[[col,'smart_9raw']].dropna(inplace=False).drop_duplicates(inplace=False)
-#                     tmp_index = tmp_df.index
-#                     tmp_df.set_index('smart_9raw', inplace=True)
-#                     cont_dfs.append((tmp_df[[col]].rolling(i_window * window_size,                                           min_periods=2).apply(lambda x:curve_fit(_linear_fit, x.index.values//24, x.values)[0][0],                  raw=False)).set_index(tmp_index.values,inplace=False).rename(columns=dict({col:'%s_slope_for_last_duration_%s'%(col, i_window * window_size)})))
+    for i_window in window_list:
+            target_df = pd.concat([df_sliding_cols[SLOPE_COLS],df[['smart_9raw']]],axis=1)
+            for col in target_df.columns:
+                if col != 'smart_9raw':
+                    tmp_df = target_df[[col,'smart_9raw']].dropna(inplace=False).drop_duplicates(inplace=False)
+                    tmp_index = tmp_df.index
+                    tmp_df.set_index('smart_9raw', inplace=True)
+                    cont_dfs.append((tmp_df[[col]].rolling(i_window * window_size,                                           min_periods=window_size).apply(lambda x:curve_fit(_linear_fit, x.index.values//24, x.values)[0][0],                  raw=False)).set_index(tmp_index.values,inplace=False).rename(columns=dict({col:'%s_slope_for_last_duration_%s'%(col, i_window * window_size)})))
 
 #     the operating duration of the disk, dt has been sorted 
 #     cont_dfs.append(pd.DataFrame((df_index['dt'] - df_index['dt'].iloc[0]).apply(lambda                                       x:x.days)).astype(np.int8).rename(columns=dict({'dt':'operation_duration'}))) 
@@ -349,6 +354,8 @@ def _data_preprocess(clip_start_date,
     
     index_cols, cate_cols, cont_cols, label_cols = check_columns(disk_smart_df.dtypes.to_dict())
     disk_smart_df.drop_duplicates(index_cols, keep='first',inplace=True)
+    mask = disk_smart_df.smart_9raw!=0
+    disk_smart_df = disk_smart_df[mask]
     
     if is_train:
         cols_with_unique_number = remove_cont_cols_with_unique_value(disk_smart_df, 
