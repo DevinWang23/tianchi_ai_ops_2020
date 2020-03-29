@@ -52,7 +52,7 @@ logger = LogManager.get_logger(__name__)
 # global varirable
 CLASS_NAME = ['无故障','有故障']
 EARLY_STOPPING_ROUNDS=10
-CLS_RANKING = 0.997  # 0.996,0.994
+CLS_RANKING = 0.994  # 0.996,0.994
 NUM_SUBMISSION = 30
 
 def _f1_score( eval_df,
