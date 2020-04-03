@@ -53,7 +53,7 @@ def inference_pipeline_ensemble_tree(fe_df,
                                      use_log,
                                      scaler,
                                      model_save_path=None,
-                                     ):
+                                     model_name=None):
     
     index_cols, cate_cols, cont_cols, label_cols, features, model = load_model(model_save_path)
     fe_df = fe_df.sort_values('dt')
@@ -90,8 +90,12 @@ def inference_pipeline_ensemble_tree(fe_df,
                     sub_fe_df,_ = log_scale(cont_cols, sub_fe_df)
             test_features = pd.concat([sub_fe_df[cate_cols], sub_fe_df[cont_cols]],
                                       axis=1)
-
-        test_x = test_features[features]
+        if model_name == "xgboost":
+            test_features = pd.get_dummies(test_features, columns=cate_cols)      
+            test_x = test_features[features]
+            test_x = xgb.DMatrix(data=test_x)  
+        else:       
+            test_x = test_features[features]
         ret = sub_fe_df[index_cols]
         ret.loc[:,'prob'] = model.predict(test_x)
         ret.loc[:,'rank'] = ret['prob'].rank()
@@ -150,7 +154,7 @@ def predict(
                                                               use_log,
                                                               scaler,
                                                               model_save_path=model_save_path,
-                                                              )
+                                                              model_name=model_name)
     elif model_type == 'stacking':
         # TODO:增加stacking部分inference pipeline
         raise NotImplementedError('%s has not been implemented' % model_name)

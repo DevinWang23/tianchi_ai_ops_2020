@@ -7,5 +7,6 @@ from .predict import (
 )
 
 from .feature_engineering import (
-     feature_engineering
+     feature_engineering,
+     SELECTED_CONT_COLS
 )

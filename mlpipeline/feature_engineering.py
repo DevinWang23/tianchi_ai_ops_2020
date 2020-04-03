@@ -59,17 +59,20 @@ DROP_NAN_COL_THRESHOLD = 30  # i.e. 30%
 #                       'smart_199raw','smart_240raw', 'smart_241raw',
 #                       'smart_242raw','smart_240_normalized']
 SELECTED_CONT_COLS = ['smart_1_normalized','smart_3_normalized',
-                      'smart_7_normalized','smart_184_normalized',
+                      'smart_7_normalized',
                       'smart_9_normalized','smart_187_normalized',
-                      'smart_188_normalized','smart_189_normalized',
+                      'smart_189_normalized',
                       'smart_191_normalized', 'smart_193_normalized',
                       'smart_195_normalized',  
                       'smart_4raw','smart_5raw',
                       'smart_9raw','smart_12raw',
+                      'smart_184raw','smart_188raw',
                       'smart_192raw','smart_194raw',
                       'smart_197raw','smart_198raw',
                       'smart_199raw',
-                      ]
+                     ]
+#                       'smart_240raw',
+#                       'smart_241raw','smart_242raw']
 SELECTED_INDEX_COLS = ['dt','serial_number','model']
 SELECTED_CATE_COLS = []
 SELECTED_LABEL_COLS = ['tag','flag']
@@ -78,7 +81,7 @@ SELECTED_LABEL_COLS = ['tag','flag']
 ERR_RECORD_COLS = {
                    'smart_1_normalized':0.0016,
                    'smart_5raw':0.025,
-                   'smart_184_normalized':0.004,
+                   'smart_184raw':0.0035,
                    'smart_187_normalized':0.018,
                    'smart_195_normalized':0.004,
                    'smart_197raw':0.019,
@@ -97,13 +100,11 @@ DEGRADATION_ERR_COLS = {
                         'smart_193_normalized':0.00097
 } 
 
-# SLOPE_COLS = ['smart_1_normalized',
-#           'smart_5raw',
-#           'smart_197raw',
-#           'smart_198raw']  # cols used to cal slope features
+# cols used to cal slope features
 SLOPE_COLS = [
           'smart_5raw',
-          ]  # cols used to cal slope features
+#           'smart_191_normalized'
+          ]  
 
 def _apply_df(args):
     df, index_cols, cont_cols, cate_cols = args
@@ -173,8 +174,8 @@ def _create_daily_features(df,
     :param min_periods:
     :return:
     """
-    assert len(cont_cols)>0 and len(index_cols)>0, \
-    'cont_cols, index_cols and label_cols cannot be empty'
+    assert len(cont_cols)>0 and len(index_cols)>0 and not df.empty, \
+    'dataframe, cont_cols, index_cols and label_cols cannot be empty'
    
     init_date = df['dt'].values
     back_fill_columns = index_cols + cont_cols
@@ -197,28 +198,40 @@ def _create_daily_features(df,
                             'degradation_err_weight')
     cont_cols += ['err_weight','seek_err_weight','degradation_err_weight']
     
-    df_sliding_cols = df[cont_cols].drop(columns=['smart_9raw','smart_9_normalized'], inplace=False)
+    df_sliding_cols = df[cont_cols].drop(columns=['smart_9raw',
+                                                  'smart_9_normalized',
+                                                  'smart_197raw',
+                                                  'smart_198raw',
+                                                  'smart_187_normalized',
+                                                  'smart_184raw',
+                                                  'smart_188raw',
+#                                                   'smart_240raw',
+#                                                   'smart_241raw',
+#                                                   'smart_242raw'
+                                                  ], inplace=False)
     
     cont_dfs = []
+#     mean_data = df_sliding_cols.rolling(window_list[0]*window_size, min_periods=min_periods).mean()
     for i_window in window_list:
         target_df = df_sliding_cols
-        cont_dfs.append((target_df.rolling(i_window * window_size, min_periods=min_periods).min()
+        cont_dfs.append((target_df.rolling(i_window * window_size, min_periods=min_periods).min() 
                     ).rename(
             columns=dict(zip(cont_cols, [col + "_min_%s" % (i_window * window_size) for col in cont_cols]))))
-        cont_dfs.append((target_df.rolling(i_window * window_size, min_periods=min_periods).max()
+        cont_dfs.append((target_df.rolling(i_window * window_size, min_periods=min_periods).max() 
                     ).rename(
             columns=dict(zip(cont_cols, [col + "_max_%s" % (i_window * window_size) for col in cont_cols]))))
-        cont_dfs.append((target_df.rolling(i_window * window_size, min_periods=min_periods).std()
+        cont_dfs.append((target_df.rolling(i_window * window_size, min_periods=min_periods).std() 
                     ).rename(
             columns=dict(zip(cont_cols, [col + "_std_%s" % (i_window * window_size) for col in cont_cols]))))
-#         cont_dfs.append((target_df.rolling(i_window * window_size, min_periods=min_periods).mean()
+#         cont_dfs.append((target_df.rolling(i_window * window_size, min_periods=min_periods).mean() / mean_data
 #                     ).rename(
 #             columns=dict(zip(cont_cols, [col + "_mean_%s" % (i_window * window_size) for col in cont_cols]))))
 
 # Cal the diff value between last period and the tendency of window
     for i_window in window_list:
             for col in df_sliding_cols.columns:
-                cont_dfs.append(df_sliding_cols[[col]].diff(periods=i_window*window_size)                            .rename(columns=dict({col:'%s_diff_for_last_period_%s' % (col, i_window * window_size)})))
+                cont_dfs.append((df_sliding_cols[[col]].diff(periods=i_window*window_size))                            .rename(columns=dict({col:'%s_diff_for_last_period_%s' % (col, i_window * window_size)})))
+#                  cont_dfs.append((df_sliding_cols[[col]].diff(periods=i_window*window_size))                            .rename(columns=dict({col:'%s_diff_for_last_period_%s' % (col, i_window * window_size)})))
     
     # Cal the slope feature
     for i_window in window_list:
@@ -235,7 +248,16 @@ def _create_daily_features(df,
 
 #     cont_dfs.append(pd.DataFrame(df['smart_9raw']//24). \
 #     rename(columns=dict({'smart_9raw':'smart_9raw_in_day_unit'})))
-    cont_dfs.append(pd.DataFrame(df['smart_9_normalized']))
+    cont_dfs.append(df[['smart_9_normalized',
+                        'smart_197raw',
+                        'smart_198raw',
+                        'smart_187_normalized',
+                        'smart_184raw',
+                        'smart_188raw',
+#                         'smart_240raw',
+#                         'smart_241raw',
+#                         'smart_242raw'
+                       ]])
     
     cont_dfs.append(df_sliding_cols)
     cont_df = pd.concat(cont_dfs, axis=1)
@@ -266,7 +288,7 @@ def _sliding_window(fe_df,
     fe_df = pd.concat(results)
     del results
     gc.collect()
-    logger.info('构造滑窗特征后，当前维度:%s' % 
+    logger.info('构造滑窗特征后，当前维度(包括index_cols):%s' % 
                                             fe_df.shape[1])
     return fe_df
 
@@ -338,6 +360,7 @@ def _data_preprocess(clip_start_date,
                      clip_end_date,
                      disk_smart_df, 
                      use_model_id,
+                     use_2017_fault_data,
                      is_train,
                     ):
     """
@@ -350,12 +373,31 @@ def _data_preprocess(clip_start_date,
     disk_smart_df = disk_smart_df[disk_smart_df['dt'] <= clip_end_date] if clip_end_date is not None \
     else disk_smart_df
     
-    correct_column_type(disk_smart_df)
+    if use_2017_fault_data:
+        fault_data_2017_path = os.path.join(conf.DATA_DIR, '2017_fault_data.h5')
+        fault_2017_df = pd.read_hdf(fault_data_2017_path, columns=SELECTED_CONT_COLS + 
+                                                       SELECTED_INDEX_COLS +        
+                                                       SELECTED_CATE_COLS + 
+                                                       SELECTED_LABEL_COLS,
+                                                       )
+        disk_smart_df = pd.concat([disk_smart_df,fault_2017_df],axis=0)
     
+    # some task-specific clean rules
+    correct_column_type(disk_smart_df)
     index_cols, cate_cols, cont_cols, label_cols = check_columns(disk_smart_df.dtypes.to_dict())
     disk_smart_df.drop_duplicates(index_cols, keep='first',inplace=True)
     mask = disk_smart_df.smart_9raw!=0
     disk_smart_df = disk_smart_df[mask]
+    if 'smart_187_normalized' in cont_cols:
+        disk_smart_df['smart_187_normalized'] = 100 - disk_smart_df['smart_187_normalized']
+    if 'smart_191_normalized' in cont_cols:
+        disk_smart_df['smart_191_normalized'] = 100 - disk_smart_df['smart_191_normalized']
+    if 'smart_193_normalized' in cont_cols:
+        disk_smart_df['smart_193_normalized'] = 100 - disk_smart_df['smart_193_normalized']
+    if 'smart_9_normalized' in cont_cols:
+        disk_smart_df['smart_9_normalized'] = 100 - disk_smart_df['smart_9_normalized']
+    if 'smart_189_normalized' in cont_cols:
+        disk_smart_df['smart_189_normalized'] = 100 - disk_smart_df['smart_189_normalized']
     
     if is_train:
         cols_with_unique_number = remove_cont_cols_with_unique_value(disk_smart_df, 
@@ -379,6 +421,7 @@ def _merge_non_fe_df_and_fe_df(non_fe_df, fe_df, index_cols):
 def feature_engineering(filename='',
                 fe_save_filename='train_fe.feather',
                 is_train=True,
+                use_2017_fault_data=False,
                 clip_start_date=None, 
                 clip_end_date=None, 
                 pred_start_date='2018-09-01',
@@ -402,6 +445,7 @@ def feature_engineering(filename='',
                            clip_end_date,
                            disk_smart_df, 
                            use_model_id,
+                           use_2017_fault_data,
                            is_train)
    
     """ generate cont feats"""
@@ -420,9 +464,17 @@ def feature_engineering(filename='',
                             num_processes)
     
     """generate cate feats"""
-    # change model id into cate feat
+    # TODO: change model id into cate feat, try discrete continuous value into bin
     fe_df['model_type'] = fe_df['model'].map({1:0,2:1}).astype('category')
-
+    fe_df.loc[fe_df['smart_198raw']>0,'smart_198raw']=1
+    fe_df['smart_198raw'] =  fe_df['smart_198raw'].astype('category')
+    fe_df.loc[fe_df['smart_197raw']>0,'smart_197raw']=1
+    fe_df['smart_197raw'] =  fe_df['smart_197raw'].astype('category')
+    fe_df.loc[fe_df['smart_184raw']>0,'smart_184raw']=1
+    fe_df['smart_184raw'] =  fe_df['smart_184raw'].astype('category')
+    fe_df.loc[fe_df['smart_188raw']>0,'smart_188raw']=1
+    fe_df['smart_188raw'] =  fe_df['smart_188raw'].astype('category')
+    
     # drop the col with too many nan
     if is_train:
         drop_na_cols = check_nan_value(fe_df,threshold=DROP_NAN_COL_THRESHOLD)

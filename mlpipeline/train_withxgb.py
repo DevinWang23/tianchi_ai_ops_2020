@@ -311,8 +311,8 @@ def _sampling(
             for year_and_month in tqdm(normal_disk_sub_dfs):
                 tmp_df = normal_disk_sub_dfs[year_and_month]
                 weight_ratio = sample_weight_dict[year_and_month]
-                sample_dfs +=                                                                                                                              [tmp_df[~mask].sample(min(len(tmp_df[~mask]),int(normal_sample_num*weight_ratio)),random_state=random_state)]
-#                 sample_dfs+=[tmp_df.sample(min(len(tmp_df),int(normal_sample_num*(1/len(normal_disk_sub_dfs)))),random_state=random_state)]
+#                 sample_dfs +=                                                                                                                              [tmp_df[~mask].sample(min(len(tmp_df[~mask]),int(normal_sample_num*weight_ratio)),random_state=random_state)]
+                sample_dfs+=[tmp_df.sample(min(len(tmp_df),int(normal_sample_num*(1/len(normal_disk_sub_dfs)))),random_state=random_state)]
             del normal_disk_sub_dfs
             gc.collect()
 
@@ -455,7 +455,7 @@ def _eval(
           val_y,
           valid_start_date,
           valid_end_date,
-          ):
+          model_name=None):
     # eval on valid set 
     results = []
     eval_df = pd.concat([val_x_index,val_x, val_y], axis=1)
@@ -467,7 +467,10 @@ def _eval(
     for valid_date in valid_date_range:
         logger.info('验证日期：%s'%valid_date)
         sub_eval_df = eval_df[eval_df.dt==valid_date]
-        sub_eval_df.loc[:,'prob'] = model.predict(data=sub_eval_df[cate_cols + cont_cols])
+        if model_name is not None:
+            sub_eval_df.loc[:,'prob'] = model.predict(data=xgb.DMatrix(sub_eval_df[val_x.columns]))
+        else:
+            sub_eval_df.loc[:,'prob'] = model.predict(data=sub_eval_df[cate_cols + cont_cols])
         sub_eval_df.loc[:,'rank'] = sub_eval_df['prob'].rank()
         sub_eval_df.loc[:,'pred'] = (sub_eval_df['rank']>=sub_eval_df.shape[0] * CLS_RANKING).astype(int)
         sub_eval_df = sub_eval_df.loc[sub_eval_df.pred == FAULT_LABEL]
@@ -724,7 +727,188 @@ def train_pipeline_lgb(fe_df,
 def train_pipeline_ensmble():
     pass
     
+def _feature_imp_plot_xgboost(model, 
+                          features_name,
+                          train_start_time,
+                          save_feat_important=False,
+                          max_num_features=30,
+                          font_scale=0.7):
+        """
+        visualize the feature importance for lightgbm classifier
+        """
+        feat_imp = pd.DataFrame.from_dict(model.get_score(importance_type='gain'), orient="index", columns=['Value'])
+        feat_imp = feat_imp.reset_index().rename(columns = {"index":"Feature"}).sort_values(by="Value", ascending=False)
+        
+        logger.info('特征重要性：%s'%feat_imp)
+
+        # plot importance
+        fig, ax = plt.subplots(figsize=(12, 4))
+        top_data = feat_imp.iloc[0:max_num_features]
+        top_feat_name = top_data['Feature'].values
+        sns.barplot(x="Value", y="Feature", data=top_data)
+        ax.set_title('lgb top %s features important'% max_num_features)
+        ax.set_yticklabels(labels=top_feat_name)
+        pic_name = 'lgb_top_%s_feature_importance_%s.png' % (max_num_features, train_start_time)
+        if save_feat_important:
+            pic_save_path = os.path.join(conf.FIGURE_DIR, pic_name)
+            plt.savefig(pic_save_path)
+            logger.info('%s 保存至%s'% (pic_name, pic_save_path))
+        plt.show()
+
+@timer(logger)
+def train_pipeline_xgboost(fe_df, 
+                       model_params,
+                       eval_on_model_id,
+                       train_on_model_id,
+                       train_start_date,
+                       train_end_date,
+                       is_eval,
+                       valid_start_date,
+                       valid_end_date,
+                       train_date_list,
+                       val_date_list,
+                       n_fold,
+                       use_standard,
+                       use_log,
+                       use_cv,
+                       focal_loss_alpha, 
+                       focal_loss_gamma,
+                       save_feat_important,
+                       next_month_start_date,
+                       next_month_end_date,
+                       use_next_month_fault_data,
+                       use_2017_fault_data,
+                       model_save_path=None,
+                       model_name):
     
+    cols, train_fe_df, val_fe_df, train_x, train_y, val_x, val_y = _train_valid_split(fe_df,
+                                                                                       train_start_date,
+                                                                                       train_end_date,
+                                                                                       valid_start_date,
+                                                                                       valid_end_date,  
+                                                                                       train_on_model_id,
+                                                                                       eval_on_model_id,
+                                                                                       use_next_month_fault_data,
+                                                                                       next_month_start_date,
+                                                                                       next_month_end_date,
+                                                                                       use_2017_fault_data,
+                                                                                       use_standard,
+                                                                                       use_log)
+    
+    index_cols, cate_cols, cont_cols, label_cols = cols
+    val_x_index = val_fe_df[index_cols]
+    train_x = pd.get_dummies(train_x, columns=cate_cols)
+    val_x = pd.get_dummies(val_x, columns=cate_cols)
+    feature_name = train_x.columns
+
+    if is_eval:
+        if not use_cv:
+            num_train_pos = len(train_fe_df[train_fe_df[USING_LABEL]==FAULT_LABEL])
+            num_train_neg = len(train_fe_df[train_fe_df[USING_LABEL]!=FAULT_LABEL])
+            ratio_train_pos_neg = round(num_train_pos/num_train_neg, 5)
+            logger.info('训练集正负样本比:%s:%s(i.e. %s)'%(
+                                                       num_train_pos,
+                                                       num_train_neg,
+                                                       ratio_train_pos_neg))                                       
+
+            num_valid_pos = len(val_fe_df[val_fe_df[USING_LABEL]==FAULT_LABEL])
+            num_valid_neg = len(val_fe_df[val_fe_df[USING_LABEL]!=FAULT_LABEL])
+            ratio_valid_pos_neg = round(num_valid_pos/num_valid_neg, 5)
+            logger.info('验证集正负样本比:%s:%s(i.e. %s)'%(
+                                                       num_valid_pos,
+                                                       num_valid_neg,
+                                                       ratio_valid_pos_neg))
+            train_start_time = time()
+            train_set = xgb.DMatrix(data=train_x, label=train_y[USING_LABEL])
+            val_set = xgb.DMatrix(data=val_x, label=val_y[USING_LABEL])
+            
+            evals_result = {}
+
+            logger.info('eval参数:%s' % model_params)
+            
+            model = xgb.train(params = model_params, 
+                              dtrain = train_set, 
+                              evals = [(train_set, 'train'), (val_set, 'eval')],
+                              evals_result = evals_result, 
+                              early_stopping_rounds = EARLY_STOPPING_ROUNDS
+                              )
+
+            # log best round of xgb
+            _log_best_round_of_model(model,
+                                     evals_result,
+                                     'eval',
+                                     'auc')
+            train_end_time = time()
+            logger.info('模型训练用时:%s'%get_time_diff(train_start_time,
+                                                     train_end_time))
+            _feature_imp_plot_xgboost(model,
+                                  feature_name,
+                                  train_start_time,
+                                  save_feat_important
+                                 )
+
+            eval_df, f1_score = _eval(
+                                       model,
+                                       val_x_index,
+                                       val_x,
+                                       val_y,
+                                       valid_start_date,
+                                       valid_end_date
+                                       model_name = model_name)
+            
+            return (model, eval_df, f1_score)
+        
+        # do cross validation for parameter selection
+    # train model 
+    else:
+        num_train_pos = len(train_fe_df[train_fe_df[USING_LABEL]==FAULT_LABEL])
+        num_train_neg = len(train_fe_df[train_fe_df[USING_LABEL]!=FAULT_LABEL])
+        ratio_train_pos_neg = round(num_train_pos/num_train_neg, 5)
+        logger.info('训练集正负样本比:%s:%s(i.e. %s)'%(
+                                                   num_train_pos,
+                                                   num_train_neg,
+                                                   ratio_train_pos_neg))  
+        
+        train_start_time = time()
+        train_set = xgb.DMatrix(data=train_x, label=train_y[USING_LABEL])
+        
+        evals_result = {}
+        
+        logger.info('train参数:%s' % model_params)
+
+        model = xgb.train(params = model_params, 
+                          dtrain = train_set, 
+                          evals = [(train_set, 'train')],
+                          evals_result = evals_result, 
+                          early_stopping_rounds = EARLY_STOPPING_ROUNDS
+                          )
+        
+        _log_best_round_of_model(model,
+                                 evals_result,
+                                 'training',
+                                 'auc')
+        train_end_time = time()
+        logger.info('模型训练用时:%s'%get_time_diff(train_start_time,
+                                                  train_end_time))
+        _feature_imp_plot_xgb(model,
+                              feature_name,
+                              train_start_time,
+                              save_feat_important,
+                             )
+        
+        # save the trained model
+        if model_save_path is not None:
+            save_model(model_save_path, 
+                          (index_cols, 
+                           cate_cols, 
+                           cont_cols,
+                           label_cols, 
+                           feature_name,
+                           model)
+                         )
+        return (model, scaler) if use_standard else (model, '')
+
+        
     
     
 @timer(logger)
@@ -837,6 +1021,33 @@ def train(model_params,
                            use_next_month_fault_data,
                            use_2017_fault_data,
                            model_save_path,)                      
+    
+    elif model_name == 'xgboost':
+        ret = train_pipeline_xgboost(fe_df, 
+                       model_params,
+                       eval_on_model_id,
+                       train_on_model_id,
+                       train_start_date,
+                       train_end_date,
+                       is_eval,
+                       valid_start_date,
+                       valid_end_date,
+                       train_date_list,
+                       val_date_list,
+                       n_fold,
+                       use_standard,
+                       use_log,
+                       use_cv,
+                       focal_loss_alpha, 
+                       focal_loss_gamma,
+                       save_feat_important,
+                       next_month_start_date,
+                       next_month_end_date,
+                       use_next_month_fault_data,
+                       use_2017_fault_data,
+                       model_save_path,
+                       model_name)
+    
     elif model_name == 'stacking':
         # TODO: 增加stacking部分train pipeline
         raise NotImplementedError('stacking model has not been implemented')

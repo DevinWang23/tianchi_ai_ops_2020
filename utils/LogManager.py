@@ -51,7 +51,8 @@ DEBUG = logging.DEBUG
 STREAM = "stream"
 SYSLOG = "syslog"
 FILE_AND_TERMINAL = "file_and_termianl"
-
+TERMINAL = "terminal"
+FILE = "file"
 
 class LogManager(object):
     log_name = 'algo.log'
@@ -93,20 +94,25 @@ class LogManager(object):
 
         formatlist = ['%(asctime)s', '%(name)s', '%(levelname)s', '%(message)s']
         formatter = logging.Formatter(' - '.join(formatlist))
-#         if LogManager.log_handle ==FILE_AND_TERMINAL:  # create handler, output the msg in terminal and log at the meantime
-        fh = LogManager.getFileHandler(get_log_path())
-        ch = logging.StreamHandler()
-        ch.setLevel(LogManager.log_level)
-        fh.setLevel(LogManager.log_level)
-        ch.setFormatter(formatter)
-        fh.setFormatter(formatter)
-        logger.addHandler(ch)
-        logger.addHandler(fh)
-#         else:  # just output to terminal
-#             ch = logging.StreamHandler()
-#             ch.setLevel(LogManager.log_level)
-#             ch.setFormatter(formatter)
-#             logger.addHandler(ch)
+        if LogManager.log_handle ==FILE_AND_TERMINAL:  # create handler, output the msg in terminal and log at the meantime
+            fh = LogManager.getFileHandler(get_log_path())
+            ch = logging.StreamHandler()
+            ch.setLevel(LogManager.log_level)
+            fh.setLevel(LogManager.log_level)
+            ch.setFormatter(formatter)
+            fh.setFormatter(formatter)
+            logger.addHandler(ch)
+            logger.addHandler(fh)
+        elif LogManager.log_handle == TERMINAL:  # just output to terminal
+            ch = logging.StreamHandler()
+            ch.setLevel(LogManager.log_level)
+            ch.setFormatter(formatter)
+            logger.addHandler(ch)
+        else:
+            fh = LogManager.getFileHandler(get_log_path())
+            fh.setLevel(LogManager.log_level)
+            fh.setFormatter(formatter)
+            logger.addHandler(fh)
             
         LogManager.created_modules.add(moduleName)
         return logger
