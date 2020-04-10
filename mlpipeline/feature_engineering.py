@@ -42,6 +42,8 @@ LogManager.created_filename = os.path.join(conf.LOG_DIR, 'feature_engineering.lo
 logger = LogManager.get_logger(__name__)
 
 # global varirable
+POWER_ON_HOURS_CATE_LIST = [-9999,  452.75 ,  905.5  , 1358.25 , 9999.]  # [-1.811,  452.75 ,  905.5  , 1358.25 , 1811.]
+BINS_FOR_CUT_POWER_ON_HOURS_FEAT = 4
 DEFAULT_MISSING_FLOAT = -1.234
 DEFAULT_MISSING_STRING = 'U'
 STD_THRESHOLD_FOR_REMOVING_COLUMNS = 1
@@ -49,6 +51,11 @@ FAULT_LABEL = 1
 USING_LABEL = 'tag'
 DROP_UNIQUE_COL_THRESHOLD = 1  # i.e. the unique number of this column should be larger than threshold 
 DROP_NAN_COL_THRESHOLD = 30  # i.e. 30%
+DIFF_WINDOW_SIZE = 7 
+DIFF_WINDOW_COLS = ['smart_5raw',
+                    'err_weight',
+                    'seek_err_weight',
+                    'degradation_err_weight']
 # SELECTED_CONT_COLS = ['smart_1_normalized','smart_7_normalized',
 #                       'smart_197_normalized','smart_198_normalized',
 #                       'smart_1raw', 'smart_4raw', 'smart_5raw', 
@@ -58,21 +65,22 @@ DROP_NAN_COL_THRESHOLD = 30  # i.e. 30%
 #                       'smart_195raw', 'smart_197raw', 'smart_198raw', 
 #                       'smart_199raw','smart_240raw', 'smart_241raw',
 #                       'smart_242raw','smart_240_normalized']
-SELECTED_CONT_COLS = ['smart_1_normalized','smart_3_normalized',
-                      'smart_7_normalized',
-                      'smart_9_normalized','smart_187_normalized',
-                      'smart_189_normalized',
-                      'smart_191_normalized', 'smart_193_normalized',
-                      'smart_195_normalized',  
-                      'smart_4raw','smart_5raw',
+NORMALIZED_SMART_COLS = ['smart_1_normalized','smart_3_normalized',
+                         'smart_7_normalized', 'smart_184_normalized',
+                         'smart_9_normalized','smart_187_normalized',
+#                        'smart_189_normalized','smart_193_normalized',
+                         'smart_191_normalized', 
+                         'smart_195_normalized']
+
+RAW_SMART_COLS = [ 'smart_4raw','smart_5raw',
                       'smart_9raw','smart_12raw',
-                      'smart_184raw','smart_188raw',
+                      'smart_188raw',
                       'smart_192raw','smart_194raw',
                       'smart_197raw','smart_198raw',
                       'smart_199raw',
                      ]
-#                       'smart_240raw',
-#                       'smart_241raw','smart_242raw']
+
+SELECTED_CONT_COLS = NORMALIZED_SMART_COLS + RAW_SMART_COLS           
 SELECTED_INDEX_COLS = ['dt','serial_number','model']
 SELECTED_CATE_COLS = []
 SELECTED_LABEL_COLS = ['tag','flag']
@@ -81,7 +89,7 @@ SELECTED_LABEL_COLS = ['tag','flag']
 ERR_RECORD_COLS = {
                    'smart_1_normalized':0.0016,
                    'smart_5raw':0.025,
-                   'smart_184raw':0.0035,
+                   'smart_184_normalized':0.004,
                    'smart_187_normalized':0.018,
                    'smart_195_normalized':0.004,
                    'smart_197raw':0.019,
@@ -89,7 +97,7 @@ ERR_RECORD_COLS = {
 }
 SEEK_ERR_COLS = { 
                   'smart_7_normalized':0.0053,
-                  'smart_189_normalized':0.00099,
+#                   'smart_189_normalized':0.00099,
                   'smart_191_normalized':0.0058,
                   'smart_194raw':0.0011,
               }
@@ -97,15 +105,32 @@ DEGRADATION_ERR_COLS = {
                         'smart_3_normalized':0.0049,
                         'smart_9_normalized':0.006,
                         'smart_192raw':0.0068,
-                        'smart_193_normalized':0.00097
+#                         'smart_193_normalized':0.00097
 } 
 
 # cols used to cal slope features
 SLOPE_COLS = [
-          'smart_5raw',
-#           'smart_191_normalized'
+          'err_weight',
+          'smart_5raw'
           ]  
 
+NON_SLIDING_COLS = [
+                    'smart_9_normalized',
+                    'smart_197raw',
+                    'smart_198raw',
+                    'smart_187_normalized',
+                    'smart_184_normalized',
+                    'smart_191_normalized',
+                    'smart_188raw',
+                    'smart_199raw',
+                   ]
+
+POWER_ON_HOURS_COL = 'smart_9raw'
+# NORMALIZED_POWER_ON_HOURS_COL = 'smart_9_normalized'
+ERR_COMBINATION_COLS = [
+                    'err_weight',
+                    'seek_err_weight',
+                    'degradation_err_weight']
 def _apply_df(args):
     df, index_cols, cont_cols, cate_cols = args
     return _create_daily_features(df, 
@@ -196,19 +221,10 @@ def _create_daily_features(df,
     _get_combination_weight(df,
                             DEGRADATION_ERR_COLS,
                             'degradation_err_weight')
-    cont_cols += ['err_weight','seek_err_weight','degradation_err_weight']
+    cont_cols += ERR_COMBINATION_COLS
     
-    df_sliding_cols = df[cont_cols].drop(columns=['smart_9raw',
-                                                  'smart_9_normalized',
-                                                  'smart_197raw',
-                                                  'smart_198raw',
-                                                  'smart_187_normalized',
-                                                  'smart_184raw',
-                                                  'smart_188raw',
-#                                                   'smart_240raw',
-#                                                   'smart_241raw',
-#                                                   'smart_242raw'
-                                                  ], inplace=False)
+    df_sliding_cols = df[cont_cols].drop(columns=[POWER_ON_HOURS_COL] + NON_SLIDING_COLS
+                                                  , inplace=False)
     
     cont_dfs = []
 #     mean_data = df_sliding_cols.rolling(window_list[0]*window_size, min_periods=min_periods).mean()
@@ -220,44 +236,34 @@ def _create_daily_features(df,
         cont_dfs.append((target_df.rolling(i_window * window_size, min_periods=min_periods).max() 
                     ).rename(
             columns=dict(zip(cont_cols, [col + "_max_%s" % (i_window * window_size) for col in cont_cols]))))
-        cont_dfs.append((target_df.rolling(i_window * window_size, min_periods=min_periods).std() 
+        cont_dfs.append((target_df.rolling(i_window * window_size, min_periods=min_periods).std()
                     ).rename(
             columns=dict(zip(cont_cols, [col + "_std_%s" % (i_window * window_size) for col in cont_cols]))))
-#         cont_dfs.append((target_df.rolling(i_window * window_size, min_periods=min_periods).mean() / mean_data
-#                     ).rename(
-#             columns=dict(zip(cont_cols, [col + "_mean_%s" % (i_window * window_size) for col in cont_cols]))))
+        cont_dfs.append((target_df.rolling(i_window * window_size, min_periods=min_periods).mean() 
+                    ).rename(
+            columns=dict(zip(cont_cols, [col + "_mean_%s" % (i_window * window_size) for col in cont_cols]))))
 
 # Cal the diff value between last period and the tendency of window
-    for i_window in window_list:
-            for col in df_sliding_cols.columns:
-                cont_dfs.append((df_sliding_cols[[col]].diff(periods=i_window*window_size))                            .rename(columns=dict({col:'%s_diff_for_last_period_%s' % (col, i_window * window_size)})))
-#                  cont_dfs.append((df_sliding_cols[[col]].diff(periods=i_window*window_size))                            .rename(columns=dict({col:'%s_diff_for_last_period_%s' % (col, i_window * window_size)})))
+#     for i_window in window_list:
+    for col in DIFF_WINDOW_COLS:
+                cont_dfs.append((df_sliding_cols[[col]].diff(periods=DIFF_WINDOW_SIZE))                            .rename(columns=dict({col:'%s_diff_for_last_period_%s' % (col, DIFF_WINDOW_SIZE)})))
     
     # Cal the slope feature
     for i_window in window_list:
-            target_df = pd.concat([df_sliding_cols[SLOPE_COLS],df[['smart_9raw']]],axis=1)
+            target_df = pd.concat([df_sliding_cols[SLOPE_COLS],df[[POWER_ON_HOURS_COL]]],axis=1)
             for col in target_df.columns:
-                if col != 'smart_9raw':
-                    tmp_df = target_df[[col,'smart_9raw']].dropna(inplace=False).drop_duplicates(inplace=False)
+                if col != POWER_ON_HOURS_COL:
+                    tmp_df = target_df[[col,POWER_ON_HOURS_COL]].dropna(inplace=False).drop_duplicates(inplace=False)
                     tmp_index = tmp_df.index
-                    tmp_df.set_index('smart_9raw', inplace=True)
+                    tmp_df.set_index(POWER_ON_HOURS_COL, inplace=True)
                     cont_dfs.append((tmp_df[[col]].rolling(i_window * window_size,                                           min_periods=window_size).apply(lambda x:curve_fit(_linear_fit, x.index.values//24, x.values)[0][0],                  raw=False)).set_index(tmp_index.values,inplace=False).rename(columns=dict({col:'%s_slope_for_last_duration_%s'%(col, i_window * window_size)})))
 
 #     the operating duration of the disk, dt has been sorted 
 #     cont_dfs.append(pd.DataFrame((df_index['dt'] - df_index['dt'].iloc[0]).apply(lambda                                       x:x.days)).astype(np.int8).rename(columns=dict({'dt':'operation_duration'}))) 
 
-#     cont_dfs.append(pd.DataFrame(df['smart_9raw']//24). \
-#     rename(columns=dict({'smart_9raw':'smart_9raw_in_day_unit'})))
-    cont_dfs.append(df[['smart_9_normalized',
-                        'smart_197raw',
-                        'smart_198raw',
-                        'smart_187_normalized',
-                        'smart_184raw',
-                        'smart_188raw',
-#                         'smart_240raw',
-#                         'smart_241raw',
-#                         'smart_242raw'
-                       ]])
+    cont_dfs.append(pd.DataFrame(df[POWER_ON_HOURS_COL]//24). \
+    rename(columns=dict({POWER_ON_HOURS_COL:'power_on_hours_in_day_unit'})))
+    cont_dfs.append(df[NON_SLIDING_COLS])
     
     cont_dfs.append(df_sliding_cols)
     cont_df = pd.concat(cont_dfs, axis=1)
@@ -299,7 +305,7 @@ def _get_pred_data(data_path):
     """
     def __get_date_range():
         start_date = '2018-08-11'
-        end_date = '2018-09-30'
+        end_date = '2018-09-30'  # '2018-09-30'
         start_date = datetime.strptime(start_date,'%Y-%m-%d')
         while (1):
             str_start_date = datetime.strftime(start_date, '%Y-%m-%d')
@@ -386,19 +392,16 @@ def _data_preprocess(clip_start_date,
     correct_column_type(disk_smart_df)
     index_cols, cate_cols, cont_cols, label_cols = check_columns(disk_smart_df.dtypes.to_dict())
     disk_smart_df.drop_duplicates(index_cols, keep='first',inplace=True)
-    mask = disk_smart_df.smart_9raw!=0
+    mask = (disk_smart_df[POWER_ON_HOURS_COL]!=0)
     disk_smart_df = disk_smart_df[mask]
-    if 'smart_187_normalized' in cont_cols:
-        disk_smart_df['smart_187_normalized'] = 100 - disk_smart_df['smart_187_normalized']
-    if 'smart_191_normalized' in cont_cols:
-        disk_smart_df['smart_191_normalized'] = 100 - disk_smart_df['smart_191_normalized']
-    if 'smart_193_normalized' in cont_cols:
-        disk_smart_df['smart_193_normalized'] = 100 - disk_smart_df['smart_193_normalized']
-    if 'smart_9_normalized' in cont_cols:
-        disk_smart_df['smart_9_normalized'] = 100 - disk_smart_df['smart_9_normalized']
-    if 'smart_189_normalized' in cont_cols:
-        disk_smart_df['smart_189_normalized'] = 100 - disk_smart_df['smart_189_normalized']
+    disk_smart_df.dropna(subset=[POWER_ON_HOURS_COL], inplace=True)
+    logger.info(disk_smart_df[POWER_ON_HOURS_COL].isnull().sum())
     
+    # for normalized cols,  closer to 100 means better condition 
+    for col in NORMALIZED_SMART_COLS:
+        if col in cont_cols:
+            disk_smart_df[col] = 100 - disk_smart_df[col]
+            
     if is_train:
         cols_with_unique_number = remove_cont_cols_with_unique_value(disk_smart_df, 
                                                  cont_cols,
@@ -470,10 +473,25 @@ def feature_engineering(filename='',
     fe_df['smart_198raw'] =  fe_df['smart_198raw'].astype('category')
     fe_df.loc[fe_df['smart_197raw']>0,'smart_197raw']=1
     fe_df['smart_197raw'] =  fe_df['smart_197raw'].astype('category')
-    fe_df.loc[fe_df['smart_184raw']>0,'smart_184raw']=1
-    fe_df['smart_184raw'] =  fe_df['smart_184raw'].astype('category')
+    fe_df.loc[fe_df['smart_184_normalized']>0,'smart_184_normalized']=1
+    fe_df['smart_184_normalized'] =  fe_df['smart_184_normalized'].astype('category')
     fe_df.loc[fe_df['smart_188raw']>0,'smart_188raw']=1
     fe_df['smart_188raw'] =  fe_df['smart_188raw'].astype('category')
+    fe_df.loc[fe_df['smart_187_normalized']>0,'smart_187_normalized']=1
+    fe_df['smart_187_normalized'] =  fe_df['smart_187_normalized'].astype('category')
+    fe_df.loc[fe_df['smart_191_normalized']>0,'smart_191_normalized']=1
+    fe_df['smart_191_normalized'] =  fe_df['smart_191_normalized'].astype('category')
+    fe_df.loc[fe_df['smart_199raw']>0,'smart_199raw']=1
+    fe_df['smart_199raw'] =  fe_df['smart_199raw'].astype('category')
+#     fe_df.loc[fe_df['smart_5raw']>0,'smart_5raw']=1
+#     fe_df['smart_5raw'] =  fe_df['smart_5raw'].astype('category')
+#     fe_df.dropna(subset=['power_on_hours_in_day_unit'], inplace=True)
+    if is_train:
+        fe_df['power_on_hours_in_day_unit_cate'] = pd.cut(fe_df['power_on_hours_in_day_unit'],bins=BINS_FOR_CUT_POWER_ON_HOURS_FEAT, labels=False)
+    else:
+        fe_df['power_on_hours_in_day_unit_cate'] = pd.cut(fe_df['power_on_hours_in_day_unit'], POWER_ON_HOURS_CATE_LIST, labels=False)
+    fe_df['power_on_hours_in_day_unit_cate'] = fe_df['power_on_hours_in_day_unit_cate'].astype('category')
+    fe_df.drop(columns=['power_on_hours_in_day_unit'],inplace=True)
     
     # drop the col with too many nan
     if is_train:

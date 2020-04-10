@@ -18,6 +18,7 @@ import pandas as pd
 import numpy as np
 from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
+from scipy.sparse import vstack, csr_matrix
 
 from .LogManager import LogManager 
 sys.path.append('../')
@@ -226,4 +227,20 @@ def log_scale(cont_cols,
             for cont_col in tqdm(cont_cols):
                 valid_fe_df.loc[:,cont_col] =  np.log2(valid_fe_df[cont_col] + 1)
         return train_fe_df, valid_fe_df
-     
+
+@timer(logger)
+def form_sparse_onehot(y_pred, num_leaves):
+#     output_list = []
+#     for i in int_df:
+#         row = []
+#         for j in i:
+#             tmp = np.zeros(num_leaves)
+#             tmp[j]=1
+#             row.extend(tmp)
+#         output_list += [row]
+#     return pd.DataFrame(output_df)
+        transformed_matrix = np.zeros([len(y_pred), len(y_pred[0])*num_leaves],dtype=np.int8)
+        for i in range(len(y_pred)):
+            tmp = np.arange(len(y_pred[0])) * num_leaves - 1 + np.array(y_pred[i])
+            transformed_matrix[i][tmp] += 1
+        return csr_matrix(transformed_matirx)

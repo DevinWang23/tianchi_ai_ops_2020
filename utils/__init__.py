@@ -19,6 +19,7 @@ from .utils import (
     get_latest_model,
     standard_scale,
     log_scale,
+    form_sparse_onehot,
 )
 
 from .LogManager import (
