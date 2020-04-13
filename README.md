@@ -35,8 +35,7 @@ feature;
 
 ### 1.3. 模型训练
 
-将赛题视为极度不均衡二分类的任务，评估指标选用了auc + 比赛定义的f1 score, 采用**lightgbm + focal loss或scale_pos_weight**并基于**下采样或结合上下采样**以及**隔月验证**通过**random
-search**+**time series split cv 或单月验证的方式**来对模型进行训练。 
+将赛题视为极度不均衡二分类的任务，评估指标选用了auc + 比赛定义的f1 score, 采用**lightgbm + focal loss或scale_pos_weight**并基于**下采样或结合上下采样**以及**隔月验证**通过**random search**+**time series split cv 或单月验证的方式**来对模型进行训练。 
 * 下采样或结合上下采样 - **基于月份的下采样**（i.e.
   每个月随机sample一定数量的无故障磁盘）, **基于通电时间的下采样**（i.e.
   根据power on hours 将磁盘分段分桶，采样一定数量通电时间各不相同的无故障磁盘）
@@ -97,4 +96,4 @@ search**+**time series split cv 或单月验证的方式**来对模型进行训�
 [8] Proactive_Prediction_of_Hard_Disk_Drive_Failure(Li，Suarez&Camacho，
 2017): <https://github.com/yiguanxian/Disk-Failure-Prediction/>
 
-
+[9] sample_data: <https://github.com/alibaba-edu/dcbrain/tree/master/diskdata>
