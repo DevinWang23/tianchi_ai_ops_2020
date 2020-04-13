@@ -1,7 +1,7 @@
 # PAKDD2020 阿里巴巴智能运维算法大赛
 [官方赛题介绍](https://tianchi.aliyun.com/competition/entrance/231775/information)
 \-
-一句话总结，尽可能提前的预测出未来会发生故障的磁盘，从而可更改硬盘使用策略，减少停机费用以及避免因磁盘损坏而引起的数据丢失。比赛中，数据粒度为磁盘每天的smart值。最终竞赛排名 ，线上f1score-33.44
+一句话总结，尽可能提前的预测出未来会发生故障的磁盘，从而可更改硬盘使用策略，减少停机费用以及避免因磁盘损坏而引起的数据丢失。比赛中，数据粒度为磁盘每天的smart值。最终竞赛排名: 28/1173，线上f1score-33.44
 ## 一、 解决方案以及不足
 主要方案为分析raw以及normalized的smart（Self-Monitoring Analysis and
 Reporting Technology）值与磁盘故障的关系，通过emsmble tree
