@@ -141,3 +141,6 @@ log/
 submission/
 figs/
 tcdata/
+trained_model/
+best_models/
+

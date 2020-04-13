@@ -1,57 +1,100 @@
 # PAKDD2020 阿里巴巴智能运维算法大赛
+[官方赛题介绍](https://tianchi.aliyun.com/competition/entrance/231775/information)
+\-
+一句话总结，尽可能提前的预测出未来会发生故障的磁盘，从而可更改硬盘使用策略，减少停机费用以及避免因磁盘损坏而引起的数据丢失。比赛中，数据粒度为磁盘每天的smart值。
+## 一、 解决方案以及不足
+主要方案为分析raw以及normalized的smart（Self-Monitoring Analysis and
+Reporting Technology）值与磁盘故障的关系，通过emsmble tree
+模型对无故障盘以及有故障盘进行不均衡的二分类（i.e. 1158:56031892, 0.0000207)
+），并通过rank的方法，返回故障置信度高的盘，作为最后的故障盘输出。
+### 1.1 数据预处理
 
-## 一、 解决方案及算法
+根据题意以及为了增加些许故障盘样本，通过label
+smoothing，将故障盘及其发生故障前30天的数据标为故障数据，其他清洗规则如下:  
+*  剔除smart缺失值大于其本身30%的列;
+*  剔除smart值的unique个数小于3的列;
+*  剔除power on hours 等于0的列;
+*  对同一块磁盘在同一天有多条数据去重.
+### 1.2. 特征工程
+特征工程具体分为如下四步: 
 
-### 1. 数据预处理
+1.2.1.原始特征 - 基于correlation ratio
+计算连续smart值与离散故障标签的相似度以及对smart值的业务理解，挑选初始的raw以及normalized
+smart作为原始特征;
 
-对于给定的`.csv`文件，分块读入处理，首先将全部缺失的列去除，然后对数据生成标记。
+1.2.2. 构造continuous features -
+对部分smart值，以磁盘自身数据为单位进行基于滑窗的特征构建（e.g.
+窗口期内的最大值，最小值，方差，平均值，差分以及斜率值等;
 
-一共使用到了三种标记`tag, flag, 30_day` ，其中`flag=1`标记表示硬盘损坏当天的数据，`30_day=1`表示距离该硬盘损坏日期刚好为30天的数据，`tag`不为0表示数据处于损坏前30天到损坏日期的窗口之内。由于比赛的评价标准是预测硬盘在未来30日内是否出现故障，认为硬盘在出现故障之前的30日内应该有不同于正常硬盘的特征，故采取将数据集内距离损坏日期30日内的数据全部进行标记用于训练。
+1.2.3. 构造category features -
+对部分smart值进行分段，分桶，每一段作为一个类别以及将model type也转为category
+feature;
 
-随后为了提高处理效率，更改了数据类型，特征列根据特征的数值范围来判断是否使用`float32`来优化存储，最后将2017年及2018年的数据分别生成`.h5`文件存储。
+1.2.4. 特征选择 -
+基于cv，平均特征在最佳cv分数中所有folds中的重要性，挑选topk个特征。
 
-### 2. 特征工程
+### 1.3. 模型训练
 
-对于时间序列数据，首先对于缺失值进行了填充。
+将赛题视为极度不均衡二分类的任务，评估指标选用了auc + 比赛定义的f1 score, 采用**lightgbm + focal loss或scale_pos_weight**并基于**下采样或结合上下采样**以及**隔月验证**通过**random
+search**+**time series split cv 或单月验证的方式**来对模型进行训练。 
+* 下采样或结合上下采样 - **基于月份的下采样**（i.e.
+  每个月随机sample一定数量的无故障磁盘）, **基于通电时间的下采样**（i.e.
+  根据power on hours 将磁盘分段分桶，采样一定数量通电时间各不相同的无故障磁盘）
+  ），**基于聚类的下采样**（通过kmeans++聚类，对每个无故障盘簇进行采样）以及也可以在**下采样后配合SMOTE再做上采样**，所有采样只针对训练集，不包含验证集，单纯的下采样方法
+  并未直接采到1:1的比例（数据量少极易过拟合，泛华能力差），竞赛中使用的下采样比例为0.3.
+* 隔月验证 -
+  因将故障盘发生故障前30天的数据也标记为故障，所以如果以7月为验证集，为模拟真实业务场景，7月故障盘未知其往前推30天是否有故障也应为未知，所以6月的故障数据不全，故不使用，训练数据最多使用到5月31日。
 
-根据业务知识，采用滑动窗口构建新的特征
+### 1.4 方案不足
 
-`TODO`
-
-### 3. 模型训练
-
-将赛题任务视为二分类的任务，通过预测硬盘在每一天的`tag`来判断在其后的30天内是否会出现损坏。
-
-采用 lightgbm 模型完成分类任务，由于标记数据时对发生故障的前30天都进行了标记，在对于8月份的测试集做预测时，无法获取这部分盘在7月份的数据标签，因此在训练的时候采取隔月验证的思路来评估模型的表现。比如使用2018年2月至3月的数据作为训练集，则采用2018年5月的数据作为验证集，评估模型的表现。
-
-### 4. 任务预测
-
-使用训练好的模型对于测试集数据进行预测，根据输出的概率进行排序，对结果进行一定数量的截断，取排名靠前的部分预测结果作为最终结果进行提交。
-
-`TODO`
-
+不足主要体现在如下方面：
+* 并未挖掘出可用于前处理亦或是后处理的规则，只是单纯的依靠了模型的输出；
+* 对learning to rank的使用不够深入；
+* 模型迭代的策略以及对线上以及线下的错误分析；
+* TODO - 根据top选手方案与自身对比，后续继续补充
 ## 二、代码运行说明
 
-### 1. 数据预处理 
+通过`docker build -t 'test:$VERSION' .` 后，启动docker - `docker run -it
+--rm --name test:$VERSION /bin/bash` `,
+然后在docker环境中以如下pipeline逐步生成最终提交文件.
+### 2.1. 数据预处理 
 
-程序`code/data_preparing.py`
+运行 `python3 data_preprocess.py`
+清洗**2017年**、**2018年**磁盘数据并为其打上标签。
 
-直接运行 `python data_preparing.py` 生成得到2017年以及2018年的数据的`.h5`文件。
+### 2.2. 特征工程
 
-### 2. 特征工程
+运行 `python3 feature_engineering.py`
+生成得到以训练起始日期结尾的特征工程文件（e.g. fe_df_01_01.feather）。
 
-程序 `code/feature_engineering.py`
+### 2.3. 模型训练
 
-定义好相应参数，直接运行得到特征工程处理过后的数据集。
+运行 `python3 train.py` 进行参数选择，模型评估以及生成*.model用于最终预测.
 
-### 3. 模型训练
+### 2.4. 任务预测
 
-程序 `code/train.py`
+运行 `python3 predict.py` 生成最终针对线上测试集的预测结果.
 
-定义好模型参数，运行程序对模型进行训练。
 
-### 4. 任务预测
+## 参考学习资料
+[1] [smart参数中文说明（由刘登平同学提供）](./user_data/docs/SMART_explantation.jpeg)
 
-程序 `code/predict.py`
+[2] smart参数维基百科说明: <https://en.wikipedia.org/wiki/S.M.A.R.T.>
 
-使用训练好的模型运行得到对应的预测结果。
+[3] 基于机器学习的磁盘故障预测的挑战及设计思想: 
+<http://www.elecfans.com/d/739038.html>
+
+[4] 基于knn的磁盘故障预测:
+<https://github.com/yiguanxian/Disk-Failure-Prediction>
+
+[6] Hard_Drive_Failure_Prediction_Using_Big_Data(BaiDu,2015):
+<https://ieeexplore.ieee.org/document/7371435>
+
+[7] Predicting_Disk_Replacement_towards_Reliable_Data_Centers(IBM,
+2016):
+<https://www.kdd.org/kdd2016/subtopic/view/predicting-disk-replacement-towards-reliable-data-centers>
+
+[8] Proactive_Prediction_of_Hard_Disk_Drive_Failure(Li，Suarez&Camacho，
+2017): <https://github.com/yiguanxian/Disk-Failure-Prediction/>
+
+

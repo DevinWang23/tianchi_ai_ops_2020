@@ -2,7 +2,7 @@ import os
 
 # Folder dir 
 ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
-DATA_DIR = os.path.join(ROOT_DIR, 'data')
+DATA_DIR = os.path.join(ROOT_DIR, 'sample_data')
 LOG_DIR = os.path.join(ROOT_DIR, 'log')
 LIB_DIR = os.path.join(ROOT_DIR, 'lib')
 FIGURE_DIR = os.path.join(ROOT_DIR, 'figs')

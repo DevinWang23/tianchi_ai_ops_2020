@@ -200,7 +200,7 @@ def remove_cont_cols_with_unique_value(fe_df, cont_cols, threshold=3):
     unique_cols = []
     for col in cont_cols:
         num_unique = len(fe_df[col].unique())
-        logger.info('fe_df: %s - %s ' %(col, num_unique))
+        logger.info('%s - %s ' %(col, num_unique))
         if num_unique<=threshold:
              unique_cols += [col]
     logger.info('drop cols: %s' % unique_cols)

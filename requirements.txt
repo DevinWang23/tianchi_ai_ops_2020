@@ -11,3 +11,5 @@ pyarrow==0.16.0
 graphviz==0.13.2
 jupyter==1.0.0
 tables==3.6.1
+xgboost==1.0.2
+imbalanced-learn==0.6.2

@@ -122,6 +122,15 @@ def convert_test_to_hdf(test_file, save_filename):
     finally:
         hdf_file.close()
 
+def extract_2017_fault_data():
+    fe_2017_df = pd.read_hdf(os.path.join(conf.DATA_DIR,'data_2017_new_all.h5'))
+    fe_2017_df.loc[fe_2017_df.tag!=0,'tag'] = 1
+    temp_fault_df = fe_2017_df[fe_2017_df.flag==1]
+    mask = fe_2017_df.serial_number.isin(temp_fault_df.serial_number)
+    mask &= fe_2017_df.model.isin(temp_fault_df.model)
+    ret_df = fe_2017_df[mask]
+    ret_df.to_hdf(os.path.join(conf.DATA_DIR,'2017_fault_data.h5'),key='train',format='table')
+    
 if __name__ == "__main__":
     
     period_2017 = ["201707", "201708", "201709", "201710", "201711", "201712"]
@@ -129,6 +138,7 @@ if __name__ == "__main__":
 
     save_data_to_hdf(period_2017, "data_2017_all.h5")
     save_data_to_hdf(period_2018, "data_2018_all.h5")
+    extract_2017_fault_data()
 
     #convert_test_to_hdf("disk_sample_smart_log_test_a.csv", "data_201808_test_all.h5")
     convert_test_to_hdf("disk_sample_smart_log_test_b.csv", "data_201808_test_b.h5")
