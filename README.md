@@ -103,6 +103,6 @@ feature;
 
 [9] sample data source: <https://github.com/alibaba-edu/dcbrain/tree/master/diskdata>
 
-[10]self-paced-ensemble: https://github.com/ZhiningLiu1998/self-paced-ensemble
+[10] self-paced-ensemble: https://github.com/ZhiningLiu1998/self-paced-ensemble
 
 [11] rank14 solution: https://github.com/fengyang95/Alibaba_AI_Ops_Competition_Rank14
