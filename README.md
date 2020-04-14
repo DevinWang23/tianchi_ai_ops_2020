@@ -101,4 +101,4 @@ feature;
 
 [8] Proactive_Prediction_of_Hard_Disk_Drive_Failure(Li, Suarez&Camacho, 2017): <https://github.com/yiguanxian/Disk-Failure-Prediction/>
 
-[9] sample_data: <https://github.com/alibaba-edu/dcbrain/tree/master/diskdata>
+[9] sample data source: <https://github.com/alibaba-edu/dcbrain/tree/master/diskdata>
