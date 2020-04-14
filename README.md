@@ -90,6 +90,8 @@ feature;
 [4] 基于knn的磁盘故障预测:
 <https://github.com/yiguanxian/Disk-Failure-Prediction>
 
+[5] SSD故障预测，你需要了解的几个技巧: <https://developer.aliyun.com/article/712000>
+
 [6] Hard_Drive_Failure_Prediction_Using_Big_Data(BaiDu, 2015):
 <https://ieeexplore.ieee.org/document/7371435>
 
