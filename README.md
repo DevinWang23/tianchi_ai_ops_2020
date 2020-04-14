@@ -102,3 +102,7 @@ feature;
 [8] Proactive_Prediction_of_Hard_Disk_Drive_Failure(Li, Suarez&Camacho, 2017): <https://github.com/yiguanxian/Disk-Failure-Prediction/>
 
 [9] sample data source: <https://github.com/alibaba-edu/dcbrain/tree/master/diskdata>
+
+[10]self-paced-ensemble: https://github.com/ZhiningLiu1998/self-paced-ensemble
+
+[11] rank14 solution: https://github.com/fengyang95/Alibaba_AI_Ops_Competition_Rank14
