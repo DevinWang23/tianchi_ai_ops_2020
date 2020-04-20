@@ -54,7 +54,7 @@ feature;
 * 并未挖掘出可用于前处理亦或是后处理的规则，只是单纯的依靠了模型的输出；
 * 对learning to rank的使用不够深入；
 * 模型迭代的策略以及对线上以及线下的错误分析；
-* TODO - 根据top选手方案与自身对比，后续继续补充.
+* 未尝试使用回归（i.e. rank1解决方案为回归加动态阈值）
 ## 二、代码运行说明
 
 通过`docker build -t 'test:$VERSION' .` 后，启动docker - `docker run -it
