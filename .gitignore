@@ -127,7 +127,7 @@ dmypy.json
 *.tgz
 *.pdf
 *.pptx
-*.png
+# *.png
 *.npy
 *.h5
 *.json
