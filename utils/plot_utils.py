@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-Author: MengQiu Wang
-Email: wangmengqiu@ainnovation.com
+Author: Devin Wang
+Email: k.tracy.wang@gmail.com
 Date: 17/12/2019
 
 Description:
