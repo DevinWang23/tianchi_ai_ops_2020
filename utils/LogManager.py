@@ -1,18 +1,4 @@
 # -*- coding: utf-8 -*-
-"""
-Author: cbing
-Filename: LogManager.py
-Date created: 2016-12-27 10:30
-Last Modified: 2017-02-10 17:00
-Modified by: cbing
-
-Description:
-    a simple wrapper of logging
-Changelog:
-    2016-12-27 12:00 create file
-
-"""
-
 import os
 import logging
 import traceback
