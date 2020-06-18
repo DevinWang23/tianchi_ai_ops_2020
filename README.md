@@ -110,3 +110,12 @@ feature;
 [10] self-paced-ensemble: https://github.com/ZhiningLiu1998/self-paced-ensemble
 
 [11] rank14_solution: https://github.com/fengyang95/Alibaba_AI_Ops_Competition_Rank14
+
+[12] rank3_solution: https://tianchi.aliyun.com/notebook-ai/detail?spm=5176.12586969.1002.6.3f9a6f2drmrrnG&postId=107251
+
+[13] rank4_solution: https://tianchi.aliyun.com/notebook-ai/detail?spm=5176.12586969.1002.12.3f9a6f2drmrrnG&postId=108291
+
+[14] rank10_solution: https://tianchi.aliyun.com/forum/postDetail?spm=5176.12586969.1002.18.3f9a6f2drmrrnG&postId=107472
+
+[15] rank1_solution: https://tianchi.aliyun.com/forum/postDetail?spm=5176.12586969.1002.15.3f9a6f2drmrrnG&postId=107912
+
