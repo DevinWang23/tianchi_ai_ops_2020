@@ -1,4 +1,4 @@
-joblib==0.13.2
+joblib==1.2.0
 lightgbm==2.2.3
 pandas==0.25.1
 matplotlib==2.2.2
